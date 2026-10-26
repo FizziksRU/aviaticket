@@ -35,3 +35,4 @@ class SiteResult:
     error: str | None = None
     page_url: str | None = None
     elapsed: float = 0.0
+    partial: bool = False

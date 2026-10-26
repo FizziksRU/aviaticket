@@ -19,7 +19,7 @@ async def _from_api(site: SiteConfig, q: Query, settings: Settings) -> tuple[lis
     raise RuntimeError(f"неизвестный api-источник: {site.parser!r}")
 
 
-async def _from_browser(site: SiteConfig, q: Query, settings: Settings) -> tuple[list[Offer], str | None]:
+async def _from_browser(site: SiteConfig, q: Query, settings: Settings) -> tuple[list[Offer], str | None, bool]:
     url = build_url(site, q)
     snap = await fetch_snapshot(
         url,
@@ -32,6 +32,7 @@ async def _from_browser(site: SiteConfig, q: Query, settings: Settings) -> tuple
         raise RuntimeError("сайт показал капчу или блокировку")
 
     offers: list[Offer] = []
+    partial = False
     parser = PARSERS.get(site.parser)
     if site.parser and parser is None:
         raise RuntimeError(f"парсер {site.parser!r} не зарегистрирован")
@@ -39,13 +40,25 @@ async def _from_browser(site: SiteConfig, q: Query, settings: Settings) -> tuple
         offers = parser(snap, q)
         for o in offers:
             o.site = site.name
+        checker = getattr(parser, "results_complete", None)
+        if checker is None and hasattr(parser, "__module__"):
+            import sys
+            mod = sys.modules.get(parser.__module__)
+            if mod:
+                checker = getattr(mod, "results_complete", None)
+        if callable(checker):
+            try:
+                if not checker(snap):
+                    partial = True
+            except Exception:
+                pass
     if not offers and site.use_llm:
         offers = await extract_offers(snap, q, site.name, settings)
     if not offers and not parser and not site.use_llm:
         raise RuntimeError("для сайта нет парсера: запустите `python -m avia.recon` и пришлите debug/recon")
     for o in offers:
         o.url = o.url or snap.url
-    return sorted(offers, key=lambda o: o.price), snap.url
+    return sorted(offers, key=lambda o: o.price), snap.url, partial
 
 
 async def _run_site(site: SiteConfig, q: Query, settings: Settings) -> SiteResult:
@@ -53,11 +66,12 @@ async def _run_site(site: SiteConfig, q: Query, settings: Settings) -> SiteResul
     try:
         if site.source == "api":
             offers, page_url = await _from_api(site, q, settings)
+            partial = False
         else:
-            offers, page_url = await _from_browser(site, q, settings)
-        return SiteResult(site.name, True, offers, None, page_url, time.monotonic() - t0)
+            offers, page_url, partial = await _from_browser(site, q, settings)
+        return SiteResult(site.name, True, offers, None, page_url, time.monotonic() - t0, partial=partial)
     except Exception as e:  # один сайт не должен ронять весь поиск
-        return SiteResult(site.name, False, [], f"{type(e).__name__}: {e}", None, time.monotonic() - t0)
+        return SiteResult(site.name, False, [], f"{type(e).__name__}: {e}", None, time.monotonic() - t0, partial=False)
 
 
 async def search(q: Query, settings: Settings) -> list[SiteResult]:
