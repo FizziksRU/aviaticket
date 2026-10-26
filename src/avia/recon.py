@@ -52,7 +52,14 @@ async def main() -> int:
     out = ROOT / "debug" / "recon" / site_name
     out.mkdir(parents=True, exist_ok=True)
     s.headless = "--show" not in sys.argv
-    snap = await fetch_snapshot(build_url(site, q), site, headless=s.headless, debug_dir=out)
+    profile_dir = ROOT / "state" / "profiles" / site_name
+    snap = await fetch_snapshot(
+        build_url(site, q),
+        site,
+        headless=s.headless,
+        profile_dir=profile_dir,
+        debug_dir=out,
+    )
     (out / "page.txt").write_text(snap.text, encoding="utf-8")
 
     rows = []
@@ -64,6 +71,9 @@ async def main() -> int:
     index = "\n".join(f"score={sc:5d} size={sz:7d} {name}  {u}" for sc, sz, name, u in rows)
     (out / "index.txt").write_text(index + "\n", encoding="utf-8")
 
+    if snap.blocked:
+        print(f"сайт показал капчу: запустите с --show и пройдите её руками, сессия сохранится в state/profiles/{site_name}")
+    print(f"Профиль: {profile_dir}")
     print(f"Сохранено в {out}")
     print(f"JSON-ответов: {len(rows)}, блокировка: {snap.blocked}")
     print(index[:2000] or "JSON-ответов не поймано, пригодится page.txt")
