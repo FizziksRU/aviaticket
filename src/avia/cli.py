@@ -7,6 +7,7 @@ import sys
 
 from .config import load_settings
 from .formatting import format_report
+from .guard import friendly_error
 from .parsing import ParseError, parse_query
 from .pipeline import search
 
@@ -18,7 +19,10 @@ def main():
         sys.exit(str(e))
     s = load_settings()
     s.headless = "--show" not in sys.argv  # --show: видеть браузер
-    results = asyncio.run(search(q, s))
+    try:
+        results = asyncio.run(search(q, s))
+    except Exception as e:
+        sys.exit(f"⚠️ {friendly_error(e)}")
     print(re.sub(r"<[^>]+>", "", format_report(q, results, s.top_n)))
 
 

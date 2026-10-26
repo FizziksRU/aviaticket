@@ -1,15 +1,64 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime
+import json
+import logging
+from pathlib import Path
+import re
 import time
 
-from .collector import fetch_snapshot
+from .collector import fetch_snapshot, Snapshot
 from .config import Settings, SiteConfig
 from .extract import extract_offers
+from .guard import SearchGuard, friendly_error
 from .models import Offer, Query, SiteResult
 from .parsers import PARSERS
 from .parsers.travelpayouts import fetch_travelpayouts, search_url
 from .sites import build_url
+
+log = logging.getLogger("avia.pipeline")
+
+# Общий SearchGuard на процесс (модульный объект для тестов с подменой)
+guard = SearchGuard()
+
+
+class ParserEmptyError(Exception):
+    """Исключение при 0 вариантов от парсера на непустой странице."""
+
+    def __init__(self, message: str, page_url: str | None = None) -> None:
+        super().__init__(message)
+        self.message = message
+        self.page_url = page_url
+
+
+def _save_empty_snapshot(site: SiteConfig, snap: Snapshot, settings: Settings) -> None:
+    """Сохраняет отладочный снимок при 0 вариантов и непустой странице (без токенов)."""
+    try:
+        debug_dir = Path(settings.debug_dir)
+        debug_dir.mkdir(parents=True, exist_ok=True)
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        target = debug_dir / f"{site.name}_empty_{ts}.json"
+
+        data = {
+            "url": snap.url,
+            "text": snap.text,
+            "json_payloads": snap.json_payloads,
+        }
+        content = json.dumps(data, ensure_ascii=False, indent=2)
+        if settings.tp_token:
+            content = content.replace(settings.tp_token, "[REDACTED]")
+        if settings.tg_token:
+            content = content.replace(settings.tg_token, "[REDACTED]")
+        content = re.sub(
+            r'([?&](?:token|access_token|api_key|key|secret)=)[^&"\s]+',
+            r'\1[REDACTED]',
+            content,
+            flags=re.I,
+        )
+        target.write_text(content, encoding="utf-8")
+    except Exception as e:
+        log.warning("Не удалось сохранить отладочный снимок для %s: %s", site.name, e)
 
 
 async def _from_api(site: SiteConfig, q: Query, settings: Settings) -> tuple[list[Offer], str | None]:
@@ -25,10 +74,10 @@ async def _from_browser(site: SiteConfig, q: Query, settings: Settings) -> tuple
         url,
         site,
         headless=settings.headless,
-        storage_state=settings.storage_dir / f"{site.name}.json",
+        profile_dir=settings.storage_dir / "profiles" / site.name,
         debug_dir=settings.debug_dir,
     )
-    if snap.blocked:
+    if snap.blocked or "капч" in snap.text.lower() or "блокировк" in snap.text.lower():
         raise RuntimeError("сайт показал капчу или блокировку")
 
     offers: list[Offer] = []
@@ -56,31 +105,96 @@ async def _from_browser(site: SiteConfig, q: Query, settings: Settings) -> tuple
         offers = await extract_offers(snap, q, site.name, settings)
     if not offers and not parser and not site.use_llm:
         raise RuntimeError("для сайта нет парсера: запустите `python -m avia.recon` и пришлите debug/recon")
+
+    # Проверка: 0 вариантов при непустой странице (> 200 символов) и не капча
+    if not offers and parser:
+        text_stripped = snap.text.strip()
+        is_captcha = snap.blocked or "капч" in snap.text.lower() or "блокировк" in snap.text.lower()
+        if len(text_stripped) > 200 and not is_captcha:
+            _save_empty_snapshot(site, snap, settings)
+            raise ParserEmptyError(
+                "формат выдачи мог измениться, 0 вариантов при непустой странице",
+                page_url=snap.url,
+            )
+
     for o in offers:
         o.url = o.url or snap.url
     return sorted(offers, key=lambda o: o.price), snap.url, partial
 
 
-async def _run_site(site: SiteConfig, q: Query, settings: Settings) -> SiteResult:
+async def _run_site(
+    site: SiteConfig,
+    q: Query,
+    settings: Settings,
+    *,
+    guard: SearchGuard | None = None,
+) -> SiteResult:
     t0 = time.monotonic()
-    try:
+    g = guard if guard is not None else globals()["guard"]
+
+    async def _fetch() -> tuple[list[Offer], str | None, bool]:
         if site.source == "api":
             offers, page_url = await _from_api(site, q, settings)
-            partial = False
+            return offers, page_url, False
         else:
-            offers, page_url, partial = await _from_browser(site, q, settings)
-        return SiteResult(site.name, True, offers, None, page_url, time.monotonic() - t0, partial=partial)
-    except Exception as e:  # один сайт не должен ронять весь поиск
-        return SiteResult(site.name, False, [], f"{type(e).__name__}: {e}", None, time.monotonic() - t0, partial=False)
+            return await _from_browser(site, q, settings)
+
+    try:
+        (offers, page_url, partial), from_cache = await g.run(
+            key_site=site.name,
+            key_query=q,
+            factory=_fetch,
+        )
+        return SiteResult(
+            site=site.name,
+            ok=True,
+            offers=list(offers),
+            error=None,
+            page_url=page_url,
+            elapsed=time.monotonic() - t0,
+            partial=partial,
+            cached=from_cache,
+        )
+    except ParserEmptyError as e:
+        log.warning("Парсер сайта %s вернул 0 вариантов: %s", site.name, e)
+        return SiteResult(
+            site=site.name,
+            ok=False,
+            offers=[],
+            error=e.message,
+            page_url=e.page_url,
+            elapsed=time.monotonic() - t0,
+            partial=False,
+            cached=False,
+        )
+    except Exception as e:
+        log.exception("Ошибка при поиске на сайте %s: %s", site.name, e)
+        err_msg = str(e) if "TP_TOKEN" in str(e) else friendly_error(e)
+        return SiteResult(
+            site=site.name,
+            ok=False,
+            offers=[],
+            error=err_msg,
+            page_url=None,
+            elapsed=time.monotonic() - t0,
+            partial=False,
+            cached=False,
+        )
 
 
-async def search(q: Query, settings: Settings) -> list[SiteResult]:
+async def search(
+    q: Query,
+    settings: Settings,
+    *,
+    guard: SearchGuard | None = None,
+) -> list[SiteResult]:
     sites = [s for s in settings.sites if s.enabled]
     # браузеры тяжёлые: не больше 2 одновременно (api-источники это не касается, но их мало)
     sem = asyncio.Semaphore(2)
+    g = guard if guard is not None else globals()["guard"]
 
     async def guarded(s: SiteConfig) -> SiteResult:
         async with sem:
-            return await _run_site(s, q, settings)
+            return await _run_site(s, q, settings, guard=g)
 
     return await asyncio.gather(*(guarded(s) for s in sites))

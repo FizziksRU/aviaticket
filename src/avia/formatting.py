@@ -30,7 +30,7 @@ def offer_line(o: Offer) -> str:
 
 
 def format_report(q: Query, results: list[SiteResult], top_n: int = 5) -> str:
-    head = f"✈️ <b>{q.origin} → {q.destination}</b>, {q.depart:%d.%m.%Y}, пассажиров: {q.adults}"
+    head = f"✈️ <b>{escape(q.origin)} → {escape(q.destination)}</b>, {q.depart:%d.%m.%Y}, пассажиров: {q.adults}"
     lines = [head, ""]
 
     all_offers = sorted((o for r in results for o in r.offers), key=lambda o: (o.currency, o.price))
@@ -47,10 +47,14 @@ def format_report(q: Query, results: list[SiteResult], top_n: int = 5) -> str:
             lines.append(f"<b>{escape(r.site)}</b>: билетов не нашлось")
             if r.partial:
                 lines.append(escape("неполная выдача: сайт ещё догружал варианты"))
+            if r.cached:
+                lines.append(escape("из кэша, цены могли измениться"))
             continue
         lines.append(f"<b>{escape(r.site)}</b> ({r.elapsed:.0f} с)")
         if r.partial:
             lines.append(escape("неполная выдача: сайт ещё догружал варианты"))
+        if r.cached:
+            lines.append(escape("из кэша, цены могли измениться"))
         for o in r.offers[:top_n]:
             lines.append("• " + offer_line(o))
         if r.page_url:
