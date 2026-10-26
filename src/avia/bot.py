@@ -2,12 +2,14 @@
 from __future__ import annotations
 
 import asyncio
+from html import escape
 import logging
 
 import httpx
 
 from .config import Settings, load_settings
 from .formatting import format_report
+from .guard import friendly_error
 from .parsing import ParseError, parse_query
 from .pipeline import search
 
@@ -74,9 +76,9 @@ class Bot:
             await self.send(chat_id, f"Ищу {q.origin} → {q.destination} на {q.depart:%d.%m}, это займёт около минуты…")
             results = await search(q, self.s)
             await self.send(chat_id, format_report(q, results, self.s.top_n))
-        except Exception:
+        except Exception as e:
             log.exception("search failed")
-            await self.send(chat_id, "⚠️ Поиск упал, подробности в логе.")
+            await self.send(chat_id, f"⚠️ {escape(friendly_error(e))}")
         finally:
             self.busy.discard(chat_id)
 
