@@ -65,9 +65,13 @@ def results_complete(snapshot: Snapshot | None) -> bool:
 
     Выдача догружается периодическим опросом (polling). Официального или
     гарантированного флага завершения в структуре данных Aviasales нет,
-    поэтому признак является эмпирическим: проверяется наличие флага
-    is_over=True (или аналогичных полей завершения, таких как completed,
-    is_complete, finished) в чанках или их метаданных, иначе возвращается False.
+    поэтому признак является эмпирическим:
+    - возвращается True, если среди ответов /search/v3.2/results присутствует
+      чанк с chunk_id == 'results' и last_update_timestamp == 0 (число 0;
+      эмпирический признак финального ответа, подтверждён на двух запусках);
+    - либо проверяется наличие старых флагов завершения is_over=True, completed,
+      is_complete, finished в чанках или их метаданных.
+    Иначе возвращается False.
     """
     if not snapshot or not snapshot.json_payloads:
         return False
@@ -87,6 +91,13 @@ def results_complete(snapshot: Snapshot | None) -> bool:
         for item in items:
             if not isinstance(item, dict):
                 continue
+
+            # Эмпирический признак финального ответа: chunk_id == 'results' и last_update_timestamp == 0 (число 0)
+            if item.get("chunk_id") == "results":
+                ts = item.get("last_update_timestamp")
+                if isinstance(ts, (int, float)) and not isinstance(ts, bool) and ts == 0:
+                    return True
+
             for key in ("is_over", "completed", "is_complete", "finished"):
                 val = item.get(key)
                 if val is True or val == "true" or val == 1:
@@ -105,11 +116,13 @@ def parse_aviasales(snapshot: Snapshot, query: Query) -> list[Offer]:
     if not snapshot or not snapshot.json_payloads:
         return []
 
-    # Словарь дедупликации: ticket_key -> (last_update_timestamp, Offer)
-    tickets_by_key: dict[str, tuple[int | float, Offer]] = {}
+    # Словарь дедупликации: ticket_key -> (priority, Offer)
+    # Приоритет определяется порядком прихода ответа в snapshot.json_payloads,
+    # а запасным признаком служит last_update_timestamp (ts == 0 означает финальный).
+    tickets_by_key: dict[str, tuple[tuple[int, float], Offer]] = {}
     unkeyed_offers: list[Offer] = []
 
-    for url, body in snapshot.json_payloads:
+    for payload_idx, (url, body) in enumerate(snapshot.json_payloads):
         if "/search/v3.2/results" not in url:
             continue
         try:
@@ -122,20 +135,41 @@ def parse_aviasales(snapshot: Snapshot, query: Query) -> list[Offer]:
             if not isinstance(chunk, dict):
                 continue
             # Интересуют чанки с результатами
-            if chunk.get("chunk_id") != "results" and "tickets" not in chunk:
+            if chunk.get("chunk_id") != "results" and "tickets" not in chunk and "cheapest_ticket" not in chunk:
                 continue
 
-            try:
-                chunk_ts = float(chunk.get("last_update_timestamp") or 0)
-            except (TypeError, ValueError):
-                chunk_ts = 0.0
+            raw_ts = chunk.get("last_update_timestamp")
+            if isinstance(raw_ts, (int, float)) and not isinstance(raw_ts, bool) and raw_ts == 0:
+                effective_ts = float("inf")
+            elif raw_ts is not None:
+                try:
+                    val = float(raw_ts)
+                    effective_ts = float("inf") if val == 0 else val
+                except (TypeError, ValueError):
+                    effective_ts = -1.0
+            else:
+                effective_ts = -1.0
+
+            current_priority = (payload_idx, effective_ts)
+
             flight_legs = chunk.get("flight_legs") or []
             airlines = chunk.get("airlines") or {}
             raw_tickets = chunk.get("tickets") or []
-            if not isinstance(raw_tickets, list) or not isinstance(flight_legs, list):
+            if not isinstance(flight_legs, list):
                 continue
 
-            for t in raw_tickets:
+            # Добавляем обычные билеты, а также cheapest_ticket и filtered_cheapest_ticket
+            all_raw_tickets: list[dict[str, Any]] = []
+            if isinstance(raw_tickets, list):
+                for t in raw_tickets:
+                    if isinstance(t, dict):
+                        all_raw_tickets.append(t)
+            for key in ("cheapest_ticket", "filtered_cheapest_ticket"):
+                val = chunk.get(key)
+                if isinstance(val, dict):
+                    all_raw_tickets.append(val)
+
+            for t in all_raw_tickets:
                 if not isinstance(t, dict):
                     continue
                 try:
@@ -271,11 +305,28 @@ def parse_aviasales(snapshot: Snapshot, query: Query) -> list[Offer]:
                         url=snapshot.url or None,
                     )
 
-                    ticket_key = t.get("id") or t.get("signature")
+                    # Дедупликация по signature (или id без суффиксов _cheapest) + первому вылету
+                    raw_id = t.get("id")
+                    clean_id = re.sub(r"_(?:filtered_)?cheapest$", "", str(raw_id)) if raw_id else None
+                    sig = t.get("signature")
+                    if sig and clean_id and clean_id != sig:
+                        sig_key = clean_id
+                    elif sig:
+                        sig_key = str(sig)
+                    else:
+                        sig_key = clean_id
+
+                    first_dep = first_dep_ts if first_dep_ts > 0 else (depart_time or "")
+                    ticket_key = f"{sig_key}_{first_dep}" if sig_key else None
+
                     if ticket_key:
-                        prev = tickets_by_key.get(str(ticket_key))
-                        if prev is None or chunk_ts >= prev[0]:
-                            tickets_by_key[str(ticket_key)] = (chunk_ts, offer)
+                        prev = tickets_by_key.get(ticket_key)
+                        if (
+                            prev is None
+                            or current_priority > prev[0]
+                            or (current_priority == prev[0] and offer.price <= prev[1].price)
+                        ):
+                            tickets_by_key[ticket_key] = (current_priority, offer)
                     else:
                         unkeyed_offers.append(offer)
 

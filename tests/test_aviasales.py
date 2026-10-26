@@ -598,3 +598,161 @@ async def test_collector_polling_not_stopped_by_is_over_false(monkeypatch):
     assert timeouts_waited == [250, 250]
     assert len(snap.json_payloads) == 2
 
+
+def test_results_complete_partial_and_final():
+    """results_complete: False на partial, True на final и на обоих вместе."""
+    partial_text = load_fixture_text("results_partial_mow_ala.json")
+    final_text = load_fixture_text("results_final_mow_ala.json")
+
+    snap_partial = make_snapshot([(RESULTS_URL, partial_text)])
+    assert results_complete(snap_partial) is False
+
+    snap_final = make_snapshot([(RESULTS_URL, final_text)])
+    assert results_complete(snap_final) is True
+
+    snap_both = make_snapshot([(RESULTS_URL, partial_text), (RESULTS_URL, final_text)])
+    assert results_complete(snap_both) is True
+
+
+def test_parse_aviasales_cheapest_ticket_and_no_duplicates():
+    """cheapest_ticket попадает в результат, цена минимальна (15443), нет дублей."""
+    q = Query("MOW", "ALA", date(2026, 12, 10))
+    final_text = load_fixture_text("results_final_mow_ala.json")
+    snap = make_snapshot([(RESULTS_URL, final_text)])
+
+    offers = parse_aviasales(snap, q)
+
+    # В фикстуре всего 3 уникальных билета (Scat 15443, Scat 17981, Аэрофлот 19148)
+    assert len(offers) == 3
+
+    # Билет cheapest_ticket (15443) присутствует и является минимальным
+    min_offer = offers[0]
+    assert min_offer.price == 15443
+    assert min_offer.airline == "SCAT"
+    assert min_offer.depart_time == "22:10"
+    assert min_offer.arrive_time == "04:30"
+    assert min_offer.transfers == 0
+    assert min_offer.baggage == "без багажа"
+
+    # Проверяем отсутствие дублей (все цены уникальны и отсортированы)
+    prices = [o.price for o in offers]
+    assert prices == [15443, 17981, 19148]
+
+
+def test_parse_aviasales_partial_then_final_takes_final():
+    """При двух ответах (partial затем final) значения берутся из более позднего final."""
+    q = Query("MOW", "ALA", date(2026, 12, 10))
+    partial_text = load_fixture_text("results_partial_mow_ala.json")
+    final_text = load_fixture_text("results_final_mow_ala.json")
+
+    # В partial цена второго билета SCAT 17988, в final она обновилась на 17981
+    snap = make_snapshot([(RESULTS_URL, partial_text), (RESULTS_URL, final_text)])
+    offers = parse_aviasales(snap, q)
+
+    assert len(offers) == 3
+    assert offers[0].price == 15443
+    # Проверяем, что второй билет взят из final (17981), а не из partial (17988)
+    scat_morning = next(o for o in offers if o.depart_time == "10:10")
+    assert scat_morning.price == 17981
+    assert not any(o.price == 17988 for o in offers)
+
+
+def test_parse_aviasales_payload_arrival_order_dedup():
+    """Поздний ответ в snapshot.json_payloads побеждает ранний независимо от last_update_timestamp."""
+    q = Query("MOW", "ALA", date(2026, 12, 10))
+
+    chunk_first = {
+        "chunk_id": "results",
+        "last_update_timestamp": 500,
+        "flight_legs": [
+            {
+                "local_departure_date_time": "2026-12-10 10:00",
+                "local_arrival_date_time": "2026-12-10 14:00",
+                "departure_unix_timestamp": 1700000000,
+                "arrival_unix_timestamp": 1700014400,
+                "operating_carrier_designator": {"carrier": "SU"},
+            }
+        ],
+        "airlines": {"SU": {"name": {"ru": {"default": "Аэрофлот"}}}},
+        "tickets": [
+            {
+                "id": "t1",
+                "signature": "sig1",
+                "segments": [{"flights": [0]}],
+                "proposals": [{"price": {"value": 20000, "currency_code": "RUB"}}],
+            }
+        ],
+    }
+
+    # Поздний ответ имеет ts == 0 (финальный) и обновленную цену
+    chunk_later_final = {
+        "chunk_id": "results",
+        "last_update_timestamp": 0,
+        "flight_legs": chunk_first["flight_legs"],
+        "airlines": chunk_first["airlines"],
+        "tickets": [
+            {
+                "id": "t1",
+                "signature": "sig1",
+                "segments": [{"flights": [0]}],
+                "proposals": [{"price": {"value": 18000, "currency_code": "RUB"}}],
+            }
+        ],
+    }
+
+    snap = make_snapshot([
+        (RESULTS_URL, json.dumps([chunk_first])),
+        (RESULTS_URL, json.dumps([chunk_later_final])),
+    ])
+    offers = parse_aviasales(snap, q)
+    assert len(offers) == 1
+    assert offers[0].price == 18000
+
+
+def test_parse_aviasales_cheapest_ticket_not_present_in_tickets():
+    """cheapest_ticket попадает в выдачу, даже если его вообще нет в tickets чанка."""
+    q = Query("MOW", "ALA", date(2026, 12, 10))
+
+    chunk = {
+        "chunk_id": "results",
+        "last_update_timestamp": 0,
+        "flight_legs": [
+            {
+                "local_departure_date_time": "2026-12-10 08:00",
+                "local_arrival_date_time": "2026-12-10 12:00",
+                "departure_unix_timestamp": 1700000000,
+                "arrival_unix_timestamp": 1700014400,
+                "operating_carrier_designator": {"carrier": "SU"},
+            },
+            {
+                "local_departure_date_time": "2026-12-10 18:00",
+                "local_arrival_date_time": "2026-12-10 22:00",
+                "departure_unix_timestamp": 1700036000,
+                "arrival_unix_timestamp": 1700050400,
+                "operating_carrier_designator": {"carrier": "SU"},
+            },
+        ],
+        "airlines": {"SU": {"name": {"ru": {"default": "Аэрофлот"}}}},
+        "tickets": [
+            {
+                "id": "expensive_ticket",
+                "signature": "sig_expensive",
+                "segments": [{"flights": [0]}],
+                "proposals": [{"price": {"value": 30000, "currency_code": "RUB"}}],
+            }
+        ],
+        "cheapest_ticket": {
+            "id": "sig_cheapest_cheapest",
+            "signature": "sig_cheapest",
+            "segments": [{"flights": [1]}],
+            "proposals": [{"price": {"value": 14000, "currency_code": "RUB"}}],
+        },
+    }
+
+    snap = make_snapshot([(RESULTS_URL, json.dumps([chunk]))])
+    offers = parse_aviasales(snap, q)
+    assert len(offers) == 2
+    assert offers[0].price == 14000
+    assert offers[1].price == 30000
+
+
