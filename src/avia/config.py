@@ -24,6 +24,8 @@ class SiteConfig:
     parser: str = ""
     # use_llm: если парсера нет или он ничего не нашёл, отдать страницу в LLM (по умолчанию выключено)
     use_llm: bool = False
+    # id_resolver: имя резолвера id (например, 'tutu' включает разрешение id городов)
+    id_resolver: str = ""
 
 
 @dataclass

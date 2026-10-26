@@ -39,9 +39,11 @@ sites:
   # Заглушки: шаблон URL нужно снять руками с реальной выдачи, потом recon и парсер.
   - name: tutu
     source: browser
-    enabled: false
-    url_template: "https://avia.tutu.ru/f/Moskva/Almati/?class=Y&travelers=1&route[0]=491-12122026-117"
-    settle_ms: 25000
+    parser: tutu
+    id_resolver: tutu
+    enabled: true
+    url_template: "https://avia.tutu.ru/f/{origin_seo}/{destination_seo}/?class=Y&travelers={adults}&route[0]={origin_id}-{ddmmyyyy}-{destination_id}"
+    settle_ms: 20000
     scrolls: 2
 
   - name: yandex_travel

@@ -16,6 +16,7 @@ from .models import Offer, Query, SiteResult
 from .parsers import PARSERS
 from .parsers.travelpayouts import fetch_travelpayouts, search_url
 from .sites import build_url
+from .tutu_ids import resolve_city
 
 log = logging.getLogger("avia.pipeline")
 
@@ -69,7 +70,17 @@ async def _from_api(site: SiteConfig, q: Query, settings: Settings) -> tuple[lis
 
 
 async def _from_browser(site: SiteConfig, q: Query, settings: Settings) -> tuple[list[Offer], str | None, bool]:
-    url = build_url(site, q)
+    extra: dict[str, str] | None = None
+    if site.id_resolver == "tutu":
+        origin_id, origin_seo = await resolve_city(q.origin)
+        dest_id, dest_seo = await resolve_city(q.destination)
+        extra = {
+            "origin_id": origin_id,
+            "destination_id": dest_id,
+            "origin_seo": origin_seo,
+            "destination_seo": dest_seo,
+        }
+    url = build_url(site, q, extra=extra)
     snap = await fetch_snapshot(
         url,
         site,
