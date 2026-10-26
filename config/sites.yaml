@@ -1,0 +1,46 @@
+# Источники цен.
+#
+# source: api      HTTP-клиент без браузера (parser = имя клиента)
+# source: browser  Playwright открывает url_template, дальше парсер из src/avia/parsers/
+#                  (parser: имя) или, если use_llm: true, разбор через LLM
+#
+# Плейсхолдеры в url_template: {origin} {destination} {date_iso} {ddmm} {ddmmyyyy} {adults}
+# Коды городов IATA (MOW, ALA, TAS, MSQ, EVN ...).
+
+sites:
+  # Работает сразу после получения токена (TP_TOKEN в .env). Это кэш поисков Aviasales
+  # за последние ~48 часов, не живая цена. Цена за одного пассажира умножается на число пассажиров.
+  - name: aviasales_cache
+    source: api
+    parser: travelpayouts
+    enabled: true
+    url_template: ""
+    note: "бесплатно, без браузера; цена может отличаться от живой"
+
+  # Живая выдача Aviasales. Парсера пока нет: сначала разведка.
+  #   python -m avia.recon aviasales Москва Алматы 10.12 --show
+  # потом пришлите debug/recon/aviasales, я напишу парсер и включу сайт.
+  - name: aviasales
+    source: browser
+    parser: ""
+    enabled: false
+    url_template: "https://www.aviasales.ru/search/{origin}{ddmm}{destination}{adults}"
+    settle_ms: 12000
+    scrolls: 4
+    note: "выдача грузится 30-60 секунд, поэтому большой settle_ms"
+
+  # Заглушки: шаблон URL нужно снять руками с реальной выдачи, потом recon и парсер.
+  - name: kupibilet
+    source: browser
+    enabled: false
+    url_template: "https://www.kupibilet.ru/search?TODO"
+
+  - name: tutu
+    source: browser
+    enabled: false
+    url_template: "https://avia.tutu.ru/TODO"
+
+  - name: yandex_travel
+    source: browser
+    enabled: false
+    url_template: "https://travel.yandex.ru/avia/search/TODO"

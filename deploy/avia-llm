@@ -1,0 +1,41 @@
+#!/bin/bash
+# /opt/gemini-pool/bin/avia-llm <account> <proxy> <model|->
+#
+# Обёртка для бота avia-bot. Промпт читается из stdin, ответ agy (JSON) уходит в stdout.
+# Вызывать от пользователя pool: ssh root@СЕРВЕР "runuser -u pool -- /opt/gemini-pool/bin/avia-llm acc4 http://127.0.0.1:3105 -"
+#
+# Важно: agy запускается БЕЗ --dangerously-skip-permissions. Бот отдаёт сюда текст чужих
+# сайтов (недоверенные данные), инструменты агенту не нужны, а с полными правами инструкция
+# внутри страницы могла бы читать файлы сервера (в том числе /etc/gemini-pool.env).
+set -euo pipefail
+
+acc=${1:?account}
+proxy=${2:?proxy}
+model=${3:--}
+
+[[ $acc =~ ^acc[0-9]+$ ]] || { echo "bad account" >&2; exit 2; }
+[[ $proxy =~ ^http://127\.0\.0\.1:3[0-9]{3}$ ]] || { echo "bad proxy" >&2; exit 2; }
+[[ $model == - || $model =~ ^[A-Za-z0-9._-]+$ ]] || { echo "bad model" >&2; exit 2; }
+
+profile=/var/lib/gemini-pool/profiles/$acc
+[[ -d $profile ]] || { echo "no profile for $acc" >&2; exit 2; }
+
+# один аргумент командной строки ограничен 131072 байтами
+prompt=$(head -c 120000)
+[[ -n $prompt ]] || { echo "empty prompt" >&2; exit 2; }
+
+work=$(mktemp -d)
+trap 'rm -rf "$work"' EXIT
+cd "$work"
+
+args=(-p "$prompt" --output-format json)
+if [[ $model != - ]]; then
+  args+=(--model "$model")
+fi
+
+# чистое окружение, как у пула: без токенов, с профилем аккаунта и его исходящим каналом
+timeout 170 env -i \
+  PATH=/usr/local/bin:/usr/bin:/bin \
+  HOME="$profile" LANG=C.UTF-8 CI=1 \
+  HTTPS_PROXY="$proxy" \
+  /home/pool/.local/bin/agy "${args[@]}" </dev/null
