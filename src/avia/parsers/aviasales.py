@@ -120,6 +120,7 @@ def parse_aviasales(snapshot: Snapshot, query: Query) -> list[Offer]:
     # Приоритет определяется порядком прихода ответа в snapshot.json_payloads,
     # а запасным признаком служит last_update_timestamp (ts == 0 означает финальный).
     tickets_by_key: dict[str, tuple[tuple[int, float], Offer]] = {}
+    id_to_ticket_key: dict[str, str] = {}
     unkeyed_offers: list[Offer] = []
 
     for payload_idx, (url, body) in enumerate(snapshot.json_payloads):
@@ -135,20 +136,23 @@ def parse_aviasales(snapshot: Snapshot, query: Query) -> list[Offer]:
             if not isinstance(chunk, dict):
                 continue
             # Интересуют чанки с результатами
-            if chunk.get("chunk_id") != "results" and "tickets" not in chunk and "cheapest_ticket" not in chunk:
+            if (
+                chunk.get("chunk_id") != "results"
+                and "tickets" not in chunk
+                and "cheapest_ticket" not in chunk
+                and "filtered_cheapest_ticket" not in chunk
+            ):
                 continue
 
             raw_ts = chunk.get("last_update_timestamp")
-            if isinstance(raw_ts, (int, float)) and not isinstance(raw_ts, bool) and raw_ts == 0:
-                effective_ts = float("inf")
-            elif raw_ts is not None:
+            if isinstance(raw_ts, bool) or raw_ts is None:
+                effective_ts = -1.0
+            else:
                 try:
                     val = float(raw_ts)
                     effective_ts = float("inf") if val == 0 else val
                 except (TypeError, ValueError):
                     effective_ts = -1.0
-            else:
-                effective_ts = -1.0
 
             current_priority = (payload_idx, effective_ts)
 
@@ -309,15 +313,24 @@ def parse_aviasales(snapshot: Snapshot, query: Query) -> list[Offer]:
                     raw_id = t.get("id")
                     clean_id = re.sub(r"_(?:filtered_)?cheapest$", "", str(raw_id)) if raw_id else None
                     sig = t.get("signature")
-                    if sig and clean_id and clean_id != sig:
-                        sig_key = clean_id
-                    elif sig:
-                        sig_key = str(sig)
-                    else:
-                        sig_key = clean_id
+                    sig_key = str(sig) if sig else clean_id
 
                     first_dep = first_dep_ts if first_dep_ts > 0 else (depart_time or "")
                     ticket_key = f"{sig_key}_{first_dep}" if sig_key else None
+
+                    # Если у билета нет signature, но ранее встречался билет с таким же clean_id и вылетом,
+                    # используем уже известный канонический ticket_key (и переносим его при появлении signature).
+                    id_key = f"{clean_id}_{first_dep}" if clean_id else None
+                    if ticket_key and id_key:
+                        if sig and id_key in id_to_ticket_key:
+                            prev_canonical = id_to_ticket_key[id_key]
+                            if prev_canonical != ticket_key and prev_canonical in tickets_by_key:
+                                tickets_by_key[ticket_key] = tickets_by_key.pop(prev_canonical)
+                            id_to_ticket_key[id_key] = ticket_key
+                        elif not sig and id_key in id_to_ticket_key:
+                            ticket_key = id_to_ticket_key[id_key]
+                        else:
+                            id_to_ticket_key[id_key] = ticket_key
 
                     if ticket_key:
                         prev = tickets_by_key.get(ticket_key)

@@ -756,3 +756,127 @@ def test_parse_aviasales_cheapest_ticket_not_present_in_tickets():
     assert offers[1].price == 30000
 
 
+def test_parse_aviasales_dedup_id_different_from_signature():
+    """Дедупликация: при различии id и signature первичным ключом является signature."""
+    q = Query("MOW", "ALA", date(2026, 12, 10))
+
+    chunk = {
+        "chunk_id": "results",
+        "last_update_timestamp": 0,
+        "flight_legs": [
+            {
+                "local_departure_date_time": "2026-12-10 10:00",
+                "local_arrival_date_time": "2026-12-10 14:00",
+                "departure_unix_timestamp": 1700000000,
+                "arrival_unix_timestamp": 1700014400,
+                "operating_carrier_designator": {"carrier": "SU"},
+            }
+        ],
+        "airlines": {"SU": {"name": {"ru": {"default": "Аэрофлот"}}}},
+        "tickets": [
+            {
+                "id": "ticket_SU_1",
+                "signature": "sig_su",
+                "segments": [{"flights": [0]}],
+                "proposals": [{"price": {"value": 20000, "currency_code": "RUB"}}],
+            }
+        ],
+        "cheapest_ticket": {
+            "id": "sig_su_cheapest",
+            "signature": "sig_su",
+            "segments": [{"flights": [0]}],
+            "proposals": [{"price": {"value": 18000, "currency_code": "RUB"}}],
+        },
+    }
+
+    snap = make_snapshot([(RESULTS_URL, json.dumps([chunk]))])
+    offers = parse_aviasales(snap, q)
+    assert len(offers) == 1
+    assert offers[0].price == 18000
+    assert offers[0].airline == "Аэрофлот"
+
+
+def test_parse_aviasales_last_update_timestamp_boolean():
+    """Булево значение last_update_timestamp (False) не считается нулевым (финальным)."""
+    q = Query("MOW", "ALA", date(2026, 12, 10))
+
+    chunk_bool = {
+        "chunk_id": "results",
+        "last_update_timestamp": False,
+        "flight_legs": [
+            {
+                "local_departure_date_time": "2026-12-10 10:00",
+                "local_arrival_date_time": "2026-12-10 14:00",
+                "departure_unix_timestamp": 1700000000,
+                "arrival_unix_timestamp": 1700014400,
+                "operating_carrier_designator": {"carrier": "SU"},
+            }
+        ],
+        "airlines": {"SU": {"name": {"ru": {"default": "Аэрофлот"}}}},
+        "tickets": [
+            {
+                "id": "ticket_SU_1",
+                "signature": "sig_su",
+                "segments": [{"flights": [0]}],
+                "proposals": [{"price": {"value": 30000, "currency_code": "RUB"}}],
+            }
+        ],
+    }
+
+    # В results_complete False не должен распознаваться как ts == 0
+    snap = make_snapshot([(RESULTS_URL, json.dumps([chunk_bool]))])
+    assert results_complete(snap) is False
+
+    # В parse_aviasales чанк с ts=100 должен иметь более высокий приоритет, чем ts=False (-1.0)
+    chunk_valid = {
+        "chunk_id": "results",
+        "last_update_timestamp": 100,
+        "flight_legs": chunk_bool["flight_legs"],
+        "airlines": chunk_bool["airlines"],
+        "tickets": [
+            {
+                "id": "ticket_SU_1",
+                "signature": "sig_su",
+                "segments": [{"flights": [0]}],
+                "proposals": [{"price": {"value": 20000, "currency_code": "RUB"}}],
+            }
+        ],
+    }
+    snap_prio = make_snapshot([(RESULTS_URL, json.dumps([chunk_valid, chunk_bool]))])
+    offers = parse_aviasales(snap_prio, q)
+    assert len(offers) == 1
+    assert offers[0].price == 20000
+
+
+def test_parse_aviasales_filtered_cheapest_ticket_only_chunk():
+    """Чанк только с filtered_cheapest_ticket (без chunk_id=='results') корректно обрабатывается."""
+    q = Query("MOW", "ALA", date(2026, 12, 10))
+
+    chunk = {
+        "chunk_id": "filtered",
+        "last_update_timestamp": 0,
+        "flight_legs": [
+            {
+                "local_departure_date_time": "2026-12-10 12:00",
+                "local_arrival_date_time": "2026-12-10 16:00",
+                "departure_unix_timestamp": 1700007200,
+                "arrival_unix_timestamp": 1700021600,
+                "operating_carrier_designator": {"carrier": "SU"},
+            }
+        ],
+        "airlines": {"SU": {"name": {"ru": {"default": "Аэрофлот"}}}},
+        "filtered_cheapest_ticket": {
+            "id": "sig_filt_filtered_cheapest",
+            "signature": "sig_filt",
+            "segments": [{"flights": [0]}],
+            "proposals": [{"price": {"value": 16500, "currency_code": "RUB"}}],
+        },
+    }
+
+    snap = make_snapshot([(RESULTS_URL, json.dumps([chunk]))])
+    offers = parse_aviasales(snap, q)
+    assert len(offers) == 1
+    assert offers[0].price == 16500
+
+
+
