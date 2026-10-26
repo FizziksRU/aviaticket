@@ -27,6 +27,31 @@ BLOCK_MARKERS = (
     "are you a human",
 )
 IS_OVER_RE = re.compile(r'"is_over"\s*:\s*(true\b|"true"|1\b)', re.I)
+CAPTCHA_URL_RE = re.compile(r"/captcha/|smartcaptcha", re.I)
+
+CAPTCHA_DOM_JS = """() => {
+    const pattern = /captcha|smartcaptcha/i;
+    for (const el of document.querySelectorAll('*')) {
+        const isFrame = el.tagName.toLowerCase() === 'iframe';
+        for (const attr of el.attributes) {
+            const name = attr.name.toLowerCase();
+            const val = attr.value;
+            if (isFrame || name === 'src' || name === 'class' || name === 'id' || name.startsWith('data-')) {
+                if (pattern.test(name) || pattern.test(val)) {
+                    return true;
+                }
+            }
+        }
+    }
+    return false;
+}"""
+
+CAPTCHA_DOM_SELECTOR = (
+    "iframe[src*='captcha' i], iframe[src*='smartcaptcha' i], "
+    "[class*='captcha' i], [class*='smartcaptcha' i], "
+    "[id*='captcha' i], [id*='smartcaptcha' i], "
+    "[src*='captcha' i], [src*='smartcaptcha' i]"
+)
 
 
 @dataclass
@@ -70,6 +95,78 @@ def is_search_over(payloads: list[tuple[str, str]]) -> bool:
     )
 
 
+def is_captcha_url(url: str) -> bool:
+    """Проверяет, содержит ли URL '/captcha/' или 'smartcaptcha' (без учёта регистра)."""
+    return bool(CAPTCHA_URL_RE.search(url))
+
+
+def has_search_tickets(payloads: list[tuple[str, str]] | tuple[str, str] | str) -> bool:
+    """Проверяет, содержит ли хотя бы один ответ /search/v3.2/results непустой список билетов."""
+    if isinstance(payloads, str):
+        payloads = [("/search/v3.2/results", payloads)]
+    elif isinstance(payloads, tuple) and len(payloads) == 2 and isinstance(payloads[0], str):
+        payloads = [payloads]
+
+    for url, body in payloads:
+        if "/search/v3.2/results" not in url:
+            continue
+        if '"tickets"' not in body and "'tickets'" not in body:
+            continue
+        try:
+            data = json.loads(body)
+            items = data if isinstance(data, list) else [data]
+            for item in items:
+                if isinstance(item, dict):
+                    tickets = item.get("tickets")
+                    if isinstance(tickets, (list, dict)) and len(tickets) > 0:
+                        return True
+        except Exception:
+            # Запасной критерий при некорректном/обрезанном JSON
+            if re.search(r'"tickets"\s*:\s*\[\s*\{', body):
+                return True
+    return False
+
+
+has_tickets = has_search_tickets
+
+
+def decide_blocked(
+    text: str | bool,
+    captcha_seen: bool,
+    captcha_dom: bool,
+    has_tickets: bool,
+) -> bool:
+    """Чистая функция принятия решения о блокировке страницы.
+
+    Snapshot.blocked = is_blocked(text) or captcha_seen_without_results or captcha_dom,
+    где при этом если уже получен непустой список билетов, капча не считается блокировкой
+    (могла быть пройдена автоматически или показана поверх готовой выдачи).
+    """
+    text_blocked = text if isinstance(text, bool) else is_blocked(text)
+    return bool(text_blocked or ((captcha_seen or captcha_dom) and not has_tickets))
+
+
+async def check_captcha_dom(page: object) -> bool:
+    """Проверяет в DOM наличие iframe или элементов со свойствами captcha/smartcaptcha."""
+    if hasattr(page, "evaluate") and callable(getattr(page, "evaluate")):
+        try:
+            res = page.evaluate(CAPTCHA_DOM_JS)
+            if inspect.isawaitable(res):
+                res = await res
+            return bool(res)
+        except Exception:
+            pass
+    if hasattr(page, "query_selector_all") and callable(getattr(page, "query_selector_all")):
+        try:
+            res = page.query_selector_all(CAPTCHA_DOM_SELECTOR)
+            if inspect.isawaitable(res):
+                res = await res
+            return bool(res)
+        except Exception:
+            pass
+    return False
+
+
 def compact_json(payload: str, limit: int = 30_000) -> str:
     """Минифицируем JSON, чтобы он влез в промпт."""
     try:
@@ -105,6 +202,8 @@ async def fetch_snapshot(
     final_url = url
     browser = None
     ctx = None
+    captcha_seen = False
+    captcha_dom = False
 
     async with async_playwright() as pw:
         try:
@@ -130,13 +229,19 @@ async def fetch_snapshot(
             page = ctx.pages[0] if getattr(ctx, "pages", None) else await ctx.new_page()
 
             async def on_response(resp):
+                nonlocal captcha_seen
                 try:
-                    ctype = resp.headers.get("content-type", "")
+                    resp_url = getattr(resp, "url", "")
+                    if is_captcha_url(resp_url):
+                        captcha_seen = True
+                        return
+                    headers = getattr(resp, "headers", {})
+                    ctype = headers.get("content-type", "") if isinstance(headers, dict) else ""
                     if "json" not in ctype:
                         return
                     body = await resp.body()
-                    if should_save_response(resp.url, len(body)):
-                        payloads.append((resp.url, body.decode("utf-8", "replace")))
+                    if should_save_response(resp_url, len(body)):
+                        payloads.append((resp_url, body.decode("utf-8", "replace")))
                 except Exception:
                     pass  # ответ мог закрыться вместе со страницей
 
@@ -169,6 +274,7 @@ async def fetch_snapshot(
 
             text = await page.inner_text("body")
             final_url = page.url
+            captcha_dom = await check_captcha_dom(page)
 
             if debug_dir:
                 d_dir = Path(debug_dir)
@@ -182,5 +288,6 @@ async def fetch_snapshot(
             if browser is not ctx:
                 await _safe_close(browser)
 
-    blocked = is_blocked(text)
+    has_t = has_search_tickets(payloads)
+    blocked = decide_blocked(text, captcha_seen, captcha_dom, has_t)
     return Snapshot(url=final_url, text=text, json_payloads=payloads, blocked=blocked)
