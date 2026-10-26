@@ -64,7 +64,7 @@ async def fetch_snapshot(
                     return
                 body = await resp.body()
                 is_results_url = "/search/v3.2/results" in resp.url
-                min_len = 0 if is_results_url else 200
+                min_len = -1 if is_results_url else 200
                 if min_len < len(body) <= MAX_JSON_BYTES:
                     payloads.append((resp.url, body.decode("utf-8", "replace")))
             except Exception:
@@ -79,23 +79,23 @@ async def fetch_snapshot(
             except Exception:
                 pass
 
-        is_results_site = (
-            site.parser == "aviasales"
-            or "aviasales" in site.name
-            or "/search/v3.2/results" in url
-            or "/search/v3.2/results" in site.url_template
-            or any("/search/v3.2/results" in u for u, _ in payloads)
-        )
-        if is_results_site:
-            poll_interval_ms = 250
-            elapsed_ms = 0
-            while elapsed_ms < site.settle_ms:
-                if any("/search/v3.2/results" in u and '"is_over"' in b for u, b in payloads):
-                    break
-                await page.wait_for_timeout(poll_interval_ms)
-                elapsed_ms += poll_interval_ms
-        else:
-            await page.wait_for_timeout(site.settle_ms)
+        # Опрос результатов: для URL с '/search/v3.2/results' опрашиваем накопленные
+        # payloads с интервалом poll_interval_ms до появления признака завершения
+        # 'is_over': true (проверяется динамически на каждом шаге), либо до таймаута settle_ms.
+        poll_interval_ms = 250
+        elapsed_ms = 0
+        while elapsed_ms < site.settle_ms:
+            if any(
+                "/search/v3.2/results" in u
+                and re.search(r'"is_over"\s*:\s*(true\b|"true"|1\b)', b, re.IGNORECASE)
+                for u, b in payloads
+            ):
+                break
+            step = min(poll_interval_ms, site.settle_ms - elapsed_ms)
+            if step <= 0:
+                break
+            await page.wait_for_timeout(step)
+            elapsed_ms += step
 
         for _ in range(site.scrolls):
             await page.mouse.wheel(0, 1800)

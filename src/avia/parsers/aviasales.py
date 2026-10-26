@@ -11,6 +11,16 @@ from . import register_parser
 from .travelpayouts import format_duration
 
 
+def _safe_float(val: Any, default: float = 0.0) -> float:
+    """Безопасно преобразует значение в float (исключая bool)."""
+    if val is None or isinstance(val, bool):
+        return default
+    try:
+        return float(val)
+    except (TypeError, ValueError):
+        return default
+
+
 def _extract_time(dt_str: str | None) -> str | None:
     """Извлекает время вида HH:MM из строки даты/времени (например, 'YYYY-MM-DD HH:MM')."""
     if not dt_str or not isinstance(dt_str, str):
@@ -50,7 +60,7 @@ def _get_airline_name(carrier_code: str | None, airlines: dict[str, Any]) -> str
     return carrier_code
 
 
-def results_complete(snapshot: Snapshot) -> bool:
+def results_complete(snapshot: Snapshot | None) -> bool:
     """Проверяет, завершился ли опрос результатов поиска Aviasales.
 
     Выдача догружается периодическим опросом (polling). Официального или
@@ -59,7 +69,10 @@ def results_complete(snapshot: Snapshot) -> bool:
     is_over=True (или аналогичных полей завершения, таких как completed,
     is_complete, finished) в чанках или их метаданных, иначе возвращается False.
     """
-    for url, body in (snapshot.json_payloads or []):
+    if not snapshot or not snapshot.json_payloads:
+        return False
+
+    for url, body in snapshot.json_payloads:
         if "/search/v3.2/results" not in url:
             continue
         try:
@@ -112,7 +125,10 @@ def parse_aviasales(snapshot: Snapshot, query: Query) -> list[Offer]:
             if chunk.get("chunk_id") != "results" and "tickets" not in chunk:
                 continue
 
-            chunk_ts = chunk.get("last_update_timestamp") or 0
+            try:
+                chunk_ts = float(chunk.get("last_update_timestamp") or 0)
+            except (TypeError, ValueError):
+                chunk_ts = 0.0
             flight_legs = chunk.get("flight_legs") or []
             airlines = chunk.get("airlines") or {}
             raw_tickets = chunk.get("tickets") or []
@@ -137,6 +153,8 @@ def parse_aviasales(snapshot: Snapshot, query: Query) -> list[Offer]:
                         if not isinstance(p_price, dict):
                             continue
                         raw_val = p_price.get("value")
+                        if isinstance(raw_val, bool):
+                            continue
                         try:
                             val_int = int(round(float(raw_val)))
                         except (TypeError, ValueError):
@@ -167,7 +185,7 @@ def parse_aviasales(snapshot: Snapshot, query: Query) -> list[Offer]:
                     valid_legs: list[tuple[int, dict[str, Any]]] = []
                     valid = True
                     for idx in flight_indices:
-                        if not isinstance(idx, int) or idx < 0 or idx >= len(flight_legs):
+                        if isinstance(idx, bool) or not isinstance(idx, int) or idx < 0 or idx >= len(flight_legs):
                             valid = False
                             break
                         leg = flight_legs[idx]
@@ -182,7 +200,7 @@ def parse_aviasales(snapshot: Snapshot, query: Query) -> list[Offer]:
                     # Сортируем перелёты по departure_unix_timestamp
                     sorted_legs = sorted(
                         valid_legs,
-                        key=lambda item: item[1].get("departure_unix_timestamp") or 0,
+                        key=lambda item: _safe_float(item[1].get("departure_unix_timestamp")),
                     )
 
                     first_f_idx, first_leg = sorted_legs[0]
@@ -197,12 +215,11 @@ def parse_aviasales(snapshot: Snapshot, query: Query) -> list[Offer]:
 
                     # 5. Длительность
                     duration = None
-                    first_dep_ts = first_leg.get("departure_unix_timestamp")
-                    last_arr_ts = last_leg.get("arrival_unix_timestamp")
-                    if isinstance(first_dep_ts, (int, float)) and isinstance(last_arr_ts, (int, float)):
+                    first_dep_ts = _safe_float(first_leg.get("departure_unix_timestamp"), -1.0)
+                    last_arr_ts = _safe_float(last_leg.get("arrival_unix_timestamp"), -1.0)
+                    if first_dep_ts > 0 and last_arr_ts > first_dep_ts:
                         diff_sec = last_arr_ts - first_dep_ts
-                        if diff_sec > 0:
-                            duration = format_duration(int(diff_sec // 60))
+                        duration = format_duration(int(diff_sec // 60))
 
                     # 6. Авиакомпания
                     carrier_code = None
@@ -227,7 +244,14 @@ def parse_aviasales(snapshot: Snapshot, query: Query) -> list[Offer]:
                             if term is None:
                                 term = flight_terms.get(f_idx)
                             if isinstance(term, dict):
-                                b_counts.append(int(term.get("total_baggage_count", 0) or 0))
+                                raw_b = term.get("total_baggage_count", 0)
+                                if isinstance(raw_b, bool):
+                                    b_counts.append(0)
+                                else:
+                                    try:
+                                        b_counts.append(int(raw_b or 0))
+                                    except (TypeError, ValueError):
+                                        b_counts.append(0)
                             else:
                                 b_counts.append(0)
 

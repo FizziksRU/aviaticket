@@ -200,6 +200,25 @@ def test_parse_aviasales_deduplication():
     assert len(offers_rev) == 1
     assert offers_rev[0].price == 21000
 
+    # Проверка строкового timestamp в last_update_timestamp
+    chunk_str_ts = {
+        "chunk_id": "results",
+        "last_update_timestamp": "300",
+        "flight_legs": chunk_new["flight_legs"],
+        "airlines": chunk_new["airlines"],
+        "tickets": [
+            {
+                "id": "same_ticket_id",
+                "segments": [{"flights": [0]}],
+                "proposals": [{"price": {"value": 19000, "currency_code": "RUB"}}],
+            }
+        ],
+    }
+    payload_str = [(RESULTS_URL, json.dumps([chunk_old, chunk_str_ts]))]
+    offers_str = parse_aviasales(make_snapshot(payload_str), q)
+    assert len(offers_str) == 1
+    assert offers_str[0].price == 19000
+
 
 def test_parse_aviasales_broken_json_and_tickets():
     """Битый JSON не роняет парсер; битые билеты пропускаются."""
@@ -284,8 +303,9 @@ def test_results_complete():
     snap_not_over = make_snapshot([(RESULTS_URL, json.dumps([{"chunk_id": "results", "is_over": False}]))])
     assert results_complete(snap_not_over) is False
 
-    # Пустой список
+    # Пустой список и None
     assert results_complete(Snapshot("url", "", [])) is False
+    assert results_complete(None) is False
 
 
 def test_partial_in_formatting():
@@ -445,3 +465,136 @@ async def test_collector_response_filter_and_polling(monkeypatch):
     assert any("big" in b for u, b in snap.json_payloads)
     # Опрос прервался сразу по is_over, не дожидаясь settle_ms
     assert len(timeouts_waited) == 0
+
+
+def test_parse_aviasales_robustness_types():
+    """Проверка устойчивости к типам: строковые timestamp в перелётах, bool в flight_indices."""
+    q = Query("MOW", "ALA", date(2026, 12, 10))
+
+    chunk = {
+        "chunk_id": "results",
+        "last_update_timestamp": "12345",
+        "flight_legs": [
+            {
+                "local_departure_date_time": "2026-12-10 10:00",
+                "local_arrival_date_time": "2026-12-10 12:00",
+                "departure_unix_timestamp": "1700000000",  # строковый timestamp
+                "arrival_unix_timestamp": 1700007200,     # числовой timestamp
+                "operating_carrier_designator": {"carrier": "SU"},
+            },
+            {
+                "local_departure_date_time": "2026-12-10 14:00",
+                "local_arrival_date_time": "2026-12-10 18:00",
+                "departure_unix_timestamp": 1700014400,     # числовой timestamp
+                "arrival_unix_timestamp": "1700028800",     # строковый timestamp
+                "operating_carrier_designator": {"carrier": "SU"},
+            },
+        ],
+        "airlines": {"SU": {"name": {"ru": {"default": "Аэрофлот"}}}},
+        "tickets": [
+            {
+                "id": "t_str_ts",
+                "segments": [{"flights": [1, 0]}],  # порядок перелётов обратный
+                "proposals": [{"price": {"value": "25000", "currency_code": "RUB"}}],
+            },
+            {
+                "id": "t_bool_idx",
+                "segments": [{"flights": [True]}],  # True не должно трактоваться как индекс 1
+                "proposals": [{"price": {"value": 20000, "currency_code": "RUB"}}],
+            },
+        ],
+    }
+
+    snap = make_snapshot([(RESULTS_URL, json.dumps([chunk]))])
+    offers = parse_aviasales(snap, q)
+    # Билет с True в flights должен быть пропущен
+    assert len(offers) == 1
+    t = offers[0]
+    assert t.price == 25000
+    # Сортировка по строковому departure_unix_timestamp должна правильно определить первый вылет и последний прилёт
+    assert t.depart_time == "10:00"
+    assert t.arrive_time == "18:00"
+    assert t.duration == "8ч 00м"
+    assert t.transfers == 1
+
+
+@pytest.mark.asyncio
+async def test_collector_polling_not_stopped_by_is_over_false(monkeypatch):
+    """Collector не останавливает опрос при {"is_over": false} и динамически определяет URL /search/v3.2/results."""
+    from avia.collector import fetch_snapshot
+    from avia.config import SiteConfig
+
+    captured_callbacks = []
+    timeouts_waited = []
+
+    class MockResp:
+        def __init__(self, url, body_bytes, ctype="application/json"):
+            self.url = url
+            self._body = body_bytes
+            self.headers = {"content-type": ctype}
+
+        async def body(self):
+            return self._body
+
+    class MockPage:
+        def __init__(self):
+            self.url = "https://custom.com/search"
+
+        def on(self, event, callback):
+            captured_callbacks.append(callback)
+
+        async def goto(self, url, **kwargs):
+            pass
+
+        async def wait_for_timeout(self, ms):
+            timeouts_waited.append(ms)
+            cb = captured_callbacks[0]
+            if len(timeouts_waited) == 1:
+                # Первый шаг: пришел ответ с is_over: false — опрос должен продолжаться
+                await cb(MockResp("https://custom.com/search/v3.2/results?id=1", b'{"is_over": false}'))
+            elif len(timeouts_waited) == 2:
+                # Второй шаг: пришел ответ с is_over: true — опрос должен завершиться
+                await cb(MockResp("https://custom.com/search/v3.2/results?id=2", b'{"is_over": true}'))
+
+        async def inner_text(self, selector):
+            return "page text"
+
+        class mouse:
+            @staticmethod
+            async def wheel(x, y):
+                pass
+
+    class MockCtx:
+        async def new_page(self):
+            return MockPage()
+
+    class MockBrowser:
+        async def new_context(self, **kwargs):
+            return MockCtx()
+
+        async def close(self):
+            pass
+
+    class MockPW:
+        class chromium:
+            @staticmethod
+            async def launch(**kwargs):
+                return MockBrowser()
+
+    class MockPWCM:
+        async def __aenter__(self):
+            return MockPW()
+
+        async def __aexit__(self, *args):
+            pass
+
+    monkeypatch.setattr("avia.collector.async_playwright", lambda: MockPWCM())
+
+    # Сайт с нестандартным именем и парсером, URL не содержит /search/v3.2/results изначально
+    site = SiteConfig("custom_site", "https://custom.com/search", parser="custom_parser", settle_ms=10000, scrolls=0)
+    snap = await fetch_snapshot("https://custom.com/search", site)
+
+    # Должен был подождать 2 шага опроса по 250мс и прерваться, не дожидаясь 10000мс
+    assert timeouts_waited == [250, 250]
+    assert len(snap.json_payloads) == 2
+
