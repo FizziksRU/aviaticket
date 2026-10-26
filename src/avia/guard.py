@@ -85,28 +85,34 @@ class SearchGuard:
         key_site: str,
         key_query: Hashable,
         factory: Callable[[], Awaitable[T]],
-        *,
         retry_delay: float | None = None,
     ) -> tuple[T, bool]:
         """Выполняет поиск через factory с кэшированием, защитой сайта и повтором при сбое."""
         cache_key = (key_site, key_query)
 
-        # 1. Быстрая проверка кэша без ожидания блокировок
-        found, cached_val = self._get_cached(cache_key)
-        if found:
-            return cached_val, True
+        while True:
+            # 1. Быстрая проверка кэша без ожидания блокировок
+            found, cached_val = self._get_cached(cache_key)
+            if found:
+                return cached_val, True
 
-        # 2. Если одинаковый запрос уже в полёте — ждём его и берём результат
-        if cache_key in self._inflight:
-            flight = self._inflight[cache_key]
-            await flight.event.wait()
-            if flight.exception is not None:
-                raise flight.exception
-            return flight.result, True
+            # 2. Если одинаковый запрос уже в полёте — ждём его и берём результат
+            flight = self._inflight.get(cache_key)
+            if flight is not None:
+                await flight.event.wait()
+                if flight.exception is not None:
+                    # Если первичный запрос был отменён извне, ожидающий запрос повторяет поиск сам
+                    if isinstance(flight.exception, asyncio.CancelledError):
+                        if self._inflight.get(cache_key) is flight:
+                            self._inflight.pop(cache_key, None)
+                        continue
+                    raise flight.exception
+                return flight.result, True
 
-        # Регистрируем новый полёт для одинаковых одновременных запросов
-        flight = _InFlight()
-        self._inflight[cache_key] = flight
+            # Регистрируем новый полёт для одинаковых одновременных запросов
+            flight = _InFlight()
+            self._inflight[cache_key] = flight
+            break
 
         delay = self.retry_delay if retry_delay is None else float(retry_delay)
 

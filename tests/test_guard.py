@@ -173,6 +173,34 @@ async def test_concurrent_identical_queries_single_factory_call(guard: SearchGua
 
 
 @pytest.mark.asyncio
+async def test_cancelled_flight_leader_allows_follower_to_proceed(guard: SearchGuard):
+    """Если запрос-лидер отменён, ожидающий запрос не падает с CancelledError, а выполняет поиск сам."""
+    started_first = asyncio.Event()
+
+    async def leader_factory():
+        started_first.set()
+        await asyncio.sleep(10)  # Будет отменён во время ожидания
+        return "leader_result"
+
+    async def follower_factory():
+        return "follower_result"
+
+    t1 = asyncio.create_task(guard.run("site1", "query1", leader_factory))
+    await started_first.wait()
+
+    t2 = asyncio.create_task(guard.run("site1", "query1", follower_factory))
+    await asyncio.sleep(0)  # Даём t2 начать и встать в ожидание t1
+
+    t1.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await t1
+
+    res, from_cache = await t2
+    assert res == "follower_result"
+    assert from_cache is False
+
+
+@pytest.mark.asyncio
 async def test_retry_on_transport_error_success(guard: SearchGuard, fake: FakeTime):
     attempts = 0
 
