@@ -10,7 +10,9 @@ import pytest
 
 from avia.collector import (
     BLOCK_MARKERS,
+    LAST_UPDATE_ZERO_RE,
     MAX_JSON_BYTES,
+    MAX_RESULTS_BYTES,
     Snapshot,
     check_captcha_dom,
     decide_blocked,
@@ -52,7 +54,7 @@ def test_is_blocked_detection():
 
 
 def test_should_save_response_results_endpoint():
-    """Для URL '/search/v3.2/results' сохраняются любые ответы (включая короткие >= 0)."""
+    """Для URL '/search/v3.2/results' сохраняются любые ответы от 0 до MAX_RESULTS_BYTES."""
     results_url = "https://aviasales.ru/search/v3.2/results?uuid=123"
 
     # Короткие ответы
@@ -64,8 +66,13 @@ def test_should_save_response_results_endpoint():
     assert should_save_response(results_url, 500) is True
     assert should_save_response(results_url, MAX_JSON_BYTES) is True
 
-    # Превышение лимита или отрицательная длина
-    assert should_save_response(results_url, MAX_JSON_BYTES + 1) is False
+    # Ответы крупнее MAX_JSON_BYTES (400 КБ), включая реальные 1.0-1.3 МБ и до потолка MAX_RESULTS_BYTES
+    assert should_save_response(results_url, MAX_JSON_BYTES + 1) is True
+    assert should_save_response(results_url, 1_200_000) is True
+    assert should_save_response(results_url, MAX_RESULTS_BYTES) is True
+
+    # Превышение отдельного потолка MAX_RESULTS_BYTES или отрицательная длина
+    assert should_save_response(results_url, MAX_RESULTS_BYTES + 1) is False
     assert should_save_response(results_url, -1) is False
 
 
@@ -77,11 +84,13 @@ def test_should_save_response_other_urls():
         # Короткий ответ (<= 200) отбрасывается
         assert should_save_response(url, 0) is False
         assert should_save_response(url, 200) is False
-        # Длинный ответ (> 200 и <= MAX) сохраняется
+        # Длинный ответ (> 200 и <= MAX_JSON_BYTES) сохраняется
         assert should_save_response(url, 201) is True
         assert should_save_response(url, 10_000) is True
-        # Превышающий максимум отбрасывается
+        # Превышающий максимум MAX_JSON_BYTES (400 КБ) для чужого URL отбрасывается
         assert should_save_response(url, MAX_JSON_BYTES + 1) is False
+        assert should_save_response(url, 1_200_000) is False
+        assert should_save_response(url, MAX_RESULTS_BYTES) is False
 
     # URL без ключевых слов отбрасывается независимо от длины
     assert should_save_response("https://example.com/static/style.css", 500) is False
@@ -118,13 +127,35 @@ def test_is_search_over():
     # Ответ не от /search/v3.2/results даже с is_over: true
     assert is_search_over([(other_url, '{"is_over": true}')]) is False
 
-    # Ответ от /search/v3.2/results, но с is_over: false
+    # Ответ от /search/v3.2/results, но с is_over: false и без признака завершения
     assert is_search_over([(results_url, '{"is_over": false}')]) is False
 
-    # Ответ от /search/v3.2/results с is_over: true
+    # Ответ от /search/v3.2/results с is_over: true (старый протокол)
     assert is_search_over([
         (other_url, '{"price": 100}'),
         (results_url, '{"is_over": true}'),
+    ]) is True
+
+    # 1. Финальный ответ с last_update_timestamp: 0 (число ноль) распознан
+    assert is_search_over([(results_url, '{"last_update_timestamp": 0, "tickets": []}')]) is True
+    assert is_search_over([(results_url, '{"last_update_timestamp":0}')]) is True
+    assert is_search_over([(results_url, '{"last_update_timestamp" : 0}')]) is True
+    assert is_search_over([(results_url, '{"other": 1, "last_update_timestamp":0, "done": true}')]) is True
+
+    # 2. Промежуточный ответ (last_update_timestamp > 0) не считается завершением
+    assert is_search_over([(results_url, '{"last_update_timestamp": 1714567890, "tickets": []}')]) is False
+    assert is_search_over([(results_url, '{"last_update_timestamp": 1}')]) is False
+    assert is_search_over([(results_url, '{"last_update_timestamp": 12345}')]) is False
+
+    # 3. '"last_update_timestamp":0' внутри чужого URL игнорируется
+    assert is_search_over([(other_url, '{"last_update_timestamp": 0}')]) is False
+    assert is_search_over([("https://example.com/api/fares", '{"last_update_timestamp": 0}')]) is False
+    assert is_search_over([("https://tickets-api.aviasales.ru/other/endpoint", '{"last_update_timestamp": 0}')]) is False
+
+    # 4. Реалистичная последовательность опроса: промежуточный, затем финальный
+    assert is_search_over([
+        (results_url, '{"last_update_timestamp": 1690000000}'),
+        (results_url, '{"last_update_timestamp": 0, "tickets": [{"id": "t1"}]}'),
     ]) is True
 
 
@@ -609,6 +640,48 @@ async def test_fetch_snapshot_not_blocked_when_captcha_dom_but_tickets_present(m
 
     assert snap.blocked is False
     assert len(snap.json_payloads) == 1
+
+
+@pytest.mark.asyncio
+async def test_fetch_snapshot_large_results_with_last_update_zero(monkeypatch):
+    """Финальный ответ > 400 КБ для results сохраняется, чужой > 400 КБ отбрасывается, выход без ожидания."""
+    intermediate_resp = FakeResponse(
+        url="https://tickets-api.aviasales.ru/search/v3.2/results?uuid=test",
+        body=b'{"last_update_timestamp": 1710000000, "tickets": []}',
+        headers={"content-type": "application/json"},
+    )
+    # Чужой URL с телом > 400 КБ — должен быть отброшен
+    foreign_large_resp = FakeResponse(
+        url="https://example.com/api/v1/search/fares",
+        body=b'{"last_update_timestamp": 0, "pad": "' + b"x" * 500_000 + b'"}',
+        headers={"content-type": "application/json"},
+    )
+    # Финальный ответ results с телом > 400 КБ (1.1 МБ) и "last_update_timestamp": 0
+    final_large_resp = FakeResponse(
+        url="https://tickets-api.aviasales.ru/search/v3.2/results?uuid=test",
+        body=b'{"last_update_timestamp": 0, "tickets": [{"id": "t1"}], "pad": "' + b"y" * 1_100_000 + b'"}',
+        headers={"content-type": "application/json"},
+    )
+
+    page = FakePage(responses_on_goto=[intermediate_resp, foreign_large_resp, final_large_resp])
+    ctx = FakeContext(page)
+    browser = FakeBrowser(ctx)
+    pw = FakePlaywrightManager(browser=browser)
+
+    monkeypatch.setattr("avia.collector.async_playwright", lambda: pw)
+
+    site = SiteConfig("test_site", "https://example.com", settle_ms=10_000, scrolls=2)
+    snap = await fetch_snapshot("https://example.com", site)
+
+    # 1. Сохранены только results (промежуточный и крупный финальный 1.1 МБ); чужой крупный отброшен
+    saved_urls = [u for u, _ in snap.json_payloads]
+    assert len(saved_urls) == 2
+    assert all("/search/v3.2/results" in u for u in saved_urls)
+    assert any(len(b) > 1_000_000 for _, b in snap.json_payloads)
+
+    # 2. Не ждали settle_ms (10 сек): poll timeouts отсутствуют, остались только scroll timeouts
+    assert page.wait_timeouts == [1200, 1200]
+    assert snap.blocked is False
 
 
 # --- Тесты recon.py ---

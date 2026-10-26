@@ -19,6 +19,7 @@ from .config import SiteConfig
 
 JSON_URL_HINT = re.compile(r"search|ticket|price|offer|fare|avia|flight|result", re.I)
 MAX_JSON_BYTES = 400_000
+MAX_RESULTS_BYTES = 8_000_000
 BLOCK_MARKERS = (
     "captcha",
     "подтвердите, что вы не робот",
@@ -27,6 +28,7 @@ BLOCK_MARKERS = (
     "are you a human",
 )
 IS_OVER_RE = re.compile(r'"is_over"\s*:\s*(true\b|"true"|1\b)', re.I)
+LAST_UPDATE_ZERO_RE = re.compile(r'"last_update_timestamp"\s*:\s*0\b')
 CAPTCHA_URL_RE = re.compile(r"/captcha/|smartcaptcha", re.I)
 
 CAPTCHA_DOM_JS = """() => {
@@ -71,14 +73,14 @@ def is_blocked(text: str) -> bool:
 def should_save_response(url: str, length: int) -> bool:
     """Решает, нужно ли сохранять JSON-ответ по URL и длине тела.
 
-    Для URL '/search/v3.2/results' сохраняются любые ответы (включая короткие >= 0).
-    Для остальных URL проверяется совпадение с ключевыми словами и длина более 200 байт.
-    Длина не должна превышать MAX_JSON_BYTES.
+    Для URL '/search/v3.2/results' сохраняются ответы от 0 до MAX_RESULTS_BYTES.
+    Для остальных URL проверяется совпадение с ключевыми словами и длина более 200 байт
+    (не превышающая MAX_JSON_BYTES).
     """
+    if "/search/v3.2/results" in url:
+        return 0 <= length <= MAX_RESULTS_BYTES
     if not (0 <= length <= MAX_JSON_BYTES):
         return False
-    if "/search/v3.2/results" in url:
-        return True
     return bool(JSON_URL_HINT.search(url)) and length > 200
 
 
@@ -88,9 +90,14 @@ def has_is_over(body: str) -> bool:
 
 
 def is_search_over(payloads: list[tuple[str, str]]) -> bool:
-    """Проверяет, пришел ли завершающий ответ для /search/v3.2/results среди payloads."""
+    r"""Проверяет, пришел ли завершающий ответ для /search/v3.2/results среди payloads.
+
+    Возвращает True, если среди payloads для '/search/v3.2/results' есть ответ,
+    где регулярка r'"last_update_timestamp"\s*:\s*0\b' совпадает (число 0),
+    либо сработал старый признак is_over. Поиск выполняется по строке без json.loads.
+    """
     return any(
-        "/search/v3.2/results" in u and has_is_over(b)
+        "/search/v3.2/results" in u and (bool(LAST_UPDATE_ZERO_RE.search(b)) or has_is_over(b))
         for u, b in payloads
     )
 
@@ -256,7 +263,7 @@ async def fetch_snapshot(
 
             # Опрос результатов: для URL с '/search/v3.2/results' опрашиваем накопленные
             # payloads с интервалом poll_interval_ms до появления признака завершения
-            # 'is_over': true (проверяется динамически на каждом шаге), либо до таймаута settle_ms.
+            # ("last_update_timestamp": 0 или 'is_over': true), либо до таймаута settle_ms.
             poll_interval_ms = 250
             elapsed_ms = 0
             while elapsed_ms < site.settle_ms:
