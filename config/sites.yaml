@@ -13,19 +13,17 @@ sites:
   - name: aviasales_cache
     source: api
     parser: travelpayouts
-    enabled: true
+    enabled: false
     url_template: ""
     note: "бесплатно, без браузера; цена может отличаться от живой"
 
-  # Живая выдача Aviasales. Парсера пока нет: сначала разведка.
-  #   python -m avia.recon aviasales Москва Алматы 10.12 --show
-  # потом пришлите debug/recon/aviasales, я напишу парсер и включу сайт.
+  # Живая выдача Aviasales.
   - name: aviasales
     source: browser
-    parser: ""
-    enabled: false
+    parser: aviasales
+    enabled: true
     url_template: "https://www.aviasales.ru/search/{origin}{ddmm}{destination}{adults}"
-    settle_ms: 12000
+    settle_ms: 25000
     scrolls: 4
     note: "выдача грузится 30-60 секунд, поэтому большой settle_ms"
 

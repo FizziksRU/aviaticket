@@ -63,7 +63,9 @@ async def fetch_snapshot(
                 if "json" not in ctype or not JSON_URL_HINT.search(resp.url):
                     return
                 body = await resp.body()
-                if 200 < len(body) <= MAX_JSON_BYTES:
+                is_results_url = "/search/v3.2/results" in resp.url
+                min_len = 0 if is_results_url else 200
+                if min_len < len(body) <= MAX_JSON_BYTES:
                     payloads.append((resp.url, body.decode("utf-8", "replace")))
             except Exception:
                 pass  # ответ мог закрыться вместе со страницей
@@ -76,7 +78,25 @@ async def fetch_snapshot(
                 await page.wait_for_selector(site.wait_selector, timeout=45_000)
             except Exception:
                 pass
-        await page.wait_for_timeout(site.settle_ms)
+
+        is_results_site = (
+            site.parser == "aviasales"
+            or "aviasales" in site.name
+            or "/search/v3.2/results" in url
+            or "/search/v3.2/results" in site.url_template
+            or any("/search/v3.2/results" in u for u, _ in payloads)
+        )
+        if is_results_site:
+            poll_interval_ms = 250
+            elapsed_ms = 0
+            while elapsed_ms < site.settle_ms:
+                if any("/search/v3.2/results" in u and '"is_over"' in b for u, b in payloads):
+                    break
+                await page.wait_for_timeout(poll_interval_ms)
+                elapsed_ms += poll_interval_ms
+        else:
+            await page.wait_for_timeout(site.settle_ms)
+
         for _ in range(site.scrolls):
             await page.mouse.wheel(0, 1800)
             await page.wait_for_timeout(1200)

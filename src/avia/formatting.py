@@ -45,8 +45,12 @@ def format_report(q: Query, results: list[SiteResult], top_n: int = 5) -> str:
             continue
         if not r.offers:
             lines.append(f"<b>{escape(r.site)}</b>: билетов не нашлось")
+            if r.partial:
+                lines.append(escape("неполная выдача: сайт ещё догружал варианты"))
             continue
         lines.append(f"<b>{escape(r.site)}</b> ({r.elapsed:.0f} с)")
+        if r.partial:
+            lines.append(escape("неполная выдача: сайт ещё догружал варианты"))
         for o in r.offers[:top_n]:
             lines.append("• " + offer_line(o))
         if r.page_url:
