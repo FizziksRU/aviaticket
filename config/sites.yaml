@@ -40,7 +40,9 @@ sites:
   - name: tutu
     source: browser
     enabled: false
-    url_template: "https://avia.tutu.ru/TODO"
+    url_template: "https://avia.tutu.ru/f/Moskva/Almati/?class=Y&travelers=1&route[0]=491-12122026-117"
+    settle_ms: 25000
+    scrolls: 2
 
   - name: yandex_travel
     source: browser
