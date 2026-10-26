@@ -77,7 +77,7 @@ async def _from_browser(site: SiteConfig, q: Query, settings: Settings) -> tuple
         profile_dir=settings.storage_dir / "profiles" / site.name,
         debug_dir=settings.debug_dir,
     )
-    if snap.blocked or "капч" in snap.text.lower() or "блокировк" in snap.text.lower():
+    if snap.blocked:
         raise RuntimeError("сайт показал капчу или блокировку")
 
     offers: list[Offer] = []
@@ -109,7 +109,7 @@ async def _from_browser(site: SiteConfig, q: Query, settings: Settings) -> tuple
     # Проверка: 0 вариантов при непустой странице (> 200 символов) и не капча
     if not offers and parser:
         text_stripped = snap.text.strip()
-        is_captcha = snap.blocked or "капч" in snap.text.lower() or "блокировк" in snap.text.lower()
+        is_captcha = snap.blocked
         if len(text_stripped) > 200 and not is_captcha:
             _save_empty_snapshot(site, snap, settings)
             raise ParserEmptyError(
