@@ -14,7 +14,7 @@ from .pipeline import search
 
 def main():
     try:
-        q = parse_query(" ".join(sys.argv[1:]))
+        q = parse_query(" ".join(a for a in sys.argv[1:] if not a.startswith("--")))
     except ParseError as e:
         sys.exit(str(e))
     s = load_settings()
