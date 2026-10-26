@@ -12,9 +12,14 @@ from avia.collector import (
     BLOCK_MARKERS,
     MAX_JSON_BYTES,
     Snapshot,
+    check_captcha_dom,
+    decide_blocked,
     fetch_snapshot,
     has_is_over,
+    has_search_tickets,
+    has_tickets,
     is_blocked,
+    is_captcha_url,
     is_search_over,
     should_save_response,
 )
@@ -123,14 +128,182 @@ def test_is_search_over():
     ]) is True
 
 
+def test_is_captcha_url():
+    """Проверка определения URL капчи (наличие /captcha/ или smartcaptcha, без учета регистра)."""
+    # URL с /captcha/
+    assert is_captcha_url("https://aviasales.ru/captcha/verify") is True
+    assert is_captcha_url("https://captcha.yandex.net/captcha/image.png") is True
+    assert is_captcha_url("https://example.com/api/v1/CAPTCHA/check") is True
+
+    # URL со smartcaptcha
+    assert is_captcha_url("https://yastatic.net/smartcaptcha-frame/index.html") is True
+    assert is_captcha_url("https://smartcaptcha.yandexcloud.net/smartcaptcha.js") is True
+    assert is_captcha_url("https://example.com/SMARTCAPTCHA/bundle.js") is True
+
+    # Обычные URL не должны определяться как капча
+    assert is_captcha_url("https://aviasales.ru/search/v3.2/results?id=1") is False
+    assert is_captcha_url("https://aviasales.ru/static/rules.html") is False
+    assert is_captcha_url("https://example.com/static/style.css") is False
+    assert is_captcha_url("") is False
+
+
+def test_has_search_tickets():
+    """Проверка определения непустого списка билетов в ответах /search/v3.2/results."""
+    results_url = "https://aviasales.ru/search/v3.2/results?id=123"
+    other_url = "https://example.com/api/fares"
+
+    # Пустой список ответов
+    assert has_search_tickets([]) is False
+    assert has_tickets([]) is False
+
+    # Ответ не от /search/v3.2/results, даже если содержит tickets
+    assert has_search_tickets([(other_url, '{"tickets": [{"id": "t1"}]}')]) is False
+
+    # Ответ от /search/v3.2/results без билетов или с пустым списком
+    assert has_search_tickets([(results_url, '{"is_over": true}')]) is False
+    assert has_search_tickets([(results_url, '{"tickets": []}')]) is False
+    assert has_search_tickets([(results_url, '[{"tickets": []}]')]) is False
+
+    # Ответ от /search/v3.2/results с непустым списком билетов (dict)
+    assert has_search_tickets([(results_url, '{"tickets": [{"id": "t1"}]}')]) is True
+
+    # Ответ от /search/v3.2/results с непустым списком билетов (list of dicts)
+    assert has_search_tickets([(results_url, '[{"chunk_id": "results", "tickets": [{"id": "t1"}]}]')]) is True
+
+    # Несколько ответов, где билеты есть во втором
+    assert has_search_tickets([
+        (results_url, '{"tickets": []}'),
+        (results_url, '{"tickets": [{"id": "t2"}]}'),
+    ]) is True
+
+    # Прямая передача строки тела ответа или одиночного кортежа
+    assert has_search_tickets('{"tickets": [{"id": "t1"}]}') is True
+    assert has_search_tickets('{"tickets": []}') is False
+    assert has_search_tickets((results_url, '{"tickets": [{"id": "t1"}]}')) is True
+
+    # Запасной разбор при невалидном/обрезанном JSON
+    assert has_search_tickets([(results_url, 'invalid json {"tickets": [{"id": 1')]) is True
+
+
+@pytest.mark.parametrize(
+    ("is_blocked_text", "captcha_seen", "captcha_dom", "has_tickets", "expected"),
+    [
+        # Когда текст страницы не заблокирован (is_blocked_text=False):
+        # 1. Нет капчи нигде
+        (False, False, False, False, False),
+        (False, False, False, True,  False),
+        # 2. Капча только в DOM: если есть билеты — не блок (показана поверх выдачи), иначе — блок
+        (False, False, True,  False, True),
+        (False, False, True,  True,  False),
+        # 3. Капча только в сети: если есть билеты — не блок (пройдена автоматически), иначе — блок
+        (False, True,  False, False, True),
+        (False, True,  False, True,  False),
+        # 4. Капча и в сети, и в DOM: если есть билеты — не блок, иначе — блок
+        (False, True,  True,  False, True),
+        (False, True,  True,  True,  False),
+
+        # Когда в тексте страницы явный маркер блокировки (is_blocked_text=True) — всегда блокировка:
+        (True,  False, False, False, True),
+        (True,  False, False, True,  True),
+        (True,  False, True,  False, True),
+        (True,  False, True,  True,  True),
+        (True,  True,  False, False, True),
+        (True,  True,  False, True,  True),
+        (True,  True,  True,  False, True),
+        (True,  True,  True,  True,  True),
+    ],
+)
+def test_decide_blocked_all_16_combinations(is_blocked_text, captcha_seen, captcha_dom, has_tickets, expected):
+    """Проверка всех 16 комбинаций флагов в чистой функции decide_blocked."""
+    text_content = "Внимание: captcha! Доступ ограничен." if is_blocked_text else "Поиск авиабилетов: Москва — Сочи"
+
+    # Проверка при передаче реального текста страницы
+    assert decide_blocked(
+        text=text_content,
+        captcha_seen=captcha_seen,
+        captcha_dom=captcha_dom,
+        has_tickets=has_tickets,
+    ) is expected
+
+    # Проверка при прямой передаче булевого флага блокировки текста
+    assert decide_blocked(
+        text=is_blocked_text,
+        captcha_seen=captcha_seen,
+        captcha_dom=captcha_dom,
+        has_tickets=has_tickets,
+    ) is expected
+
+
+@pytest.mark.asyncio
+async def test_check_captcha_dom():
+    """Проверка функции check_captcha_dom при разных реализациях объекта страницы."""
+    # 1. Страница с evaluate, возвращающим True
+    class PageWithEvalTrue:
+        async def evaluate(self, expr):
+            return True
+
+    assert await check_captcha_dom(PageWithEvalTrue()) is True
+
+    # 2. Страница с evaluate, возвращающим False
+    class PageWithEvalFalse:
+        async def evaluate(self, expr):
+            return False
+
+    assert await check_captcha_dom(PageWithEvalFalse()) is False
+
+    # 3. Страница с evaluate, бросающим исключение
+    class PageWithEvalError:
+        async def evaluate(self, expr):
+            raise RuntimeError("Page crashed")
+
+    assert await check_captcha_dom(PageWithEvalError()) is False
+
+    # 4. Страница только с query_selector_all (без evaluate)
+    class PageWithQuerySelector:
+        async def query_selector_all(self, selector):
+            return [object()]
+
+    assert await check_captcha_dom(PageWithQuerySelector()) is True
+
+    class PageWithQuerySelectorEmpty:
+        async def query_selector_all(self, selector):
+            return []
+
+    assert await check_captcha_dom(PageWithQuerySelectorEmpty()) is False
+
+    # 5. Страница без evaluate и query_selector_all
+    assert await check_captcha_dom(object()) is False
+
+
 # --- Фейки для тестирования жизненного цикла браузера и контекста ---
 
 
+class FakeResponse:
+    def __init__(self, url: str, body: bytes = b"", headers: dict[str, str] | None = None) -> None:
+        self.url = url
+        self._body = body
+        self.headers = headers if headers is not None else {"content-type": "application/json"}
+
+    async def body(self) -> bytes:
+        return self._body
+
+
 class FakePage:
-    def __init__(self, exc_on_goto: Exception | None = None, exc_on_screenshot: Exception | None = None) -> None:
-        self.url = "https://example.com/final"
+    def __init__(
+        self,
+        exc_on_goto: Exception | None = None,
+        exc_on_screenshot: Exception | None = None,
+        evaluate_result: bool = False,
+        inner_text: str = "Результаты поиска авиабилетов",
+        url: str = "https://example.com/final",
+        responses_on_goto: list[FakeResponse] | None = None,
+    ) -> None:
+        self.url = url
         self._exc_on_goto = exc_on_goto
         self._exc_on_screenshot = exc_on_screenshot
+        self._evaluate_result = evaluate_result
+        self._inner_text = inner_text
+        self._responses_on_goto = responses_on_goto or []
         self.callbacks: list = []
         self.wait_timeouts: list[int] = []
 
@@ -140,6 +313,12 @@ class FakePage:
     async def goto(self, url, **kwargs):
         if self._exc_on_goto:
             raise self._exc_on_goto
+        import inspect
+        for resp in self._responses_on_goto:
+            for cb in self.callbacks:
+                res = cb(resp)
+                if inspect.isawaitable(res):
+                    await res
 
     async def wait_for_selector(self, selector, **kwargs):
         pass
@@ -153,7 +332,13 @@ class FakePage:
             pass
 
     async def inner_text(self, selector):
-        return "Результаты поиска авиабилетов"
+        return self._inner_text
+
+    async def evaluate(self, expression, *args):
+        return self._evaluate_result
+
+    async def query_selector_all(self, selector):
+        return [object()] if self._evaluate_result else []
 
     async def screenshot(self, path, **kwargs):
         if self._exc_on_screenshot:
@@ -333,6 +518,97 @@ async def test_fetch_snapshot_success_normal_lifecycle(monkeypatch):
     assert snap.url == "https://example.com/final"
     assert "авиабилетов" in snap.text
     assert snap.blocked is False
+
+
+@pytest.mark.asyncio
+async def test_fetch_snapshot_blocked_by_captcha_response(monkeypatch):
+    """Ответ с URL капчи без билетов приводит к snapshot.blocked=True, тело капчи не сохраняется."""
+    captcha_resp = FakeResponse(
+        url="https://captcha.yandex.net/captcha/verify?id=123",
+        body=b"<html>captcha challenge</html>",
+        headers={"content-type": "text/html"},
+    )
+    page = FakePage(responses_on_goto=[captcha_resp])
+    ctx = FakeContext(page)
+    browser = FakeBrowser(ctx)
+    pw = FakePlaywrightManager(browser=browser)
+
+    monkeypatch.setattr("avia.collector.async_playwright", lambda: pw)
+
+    site = SiteConfig("test_site", "https://example.com", settle_ms=1000, scrolls=0)
+    snap = await fetch_snapshot("https://example.com", site)
+
+    # Капча зафиксирована
+    assert snap.blocked is True
+    # Тело капчи не сохранено в json_payloads
+    assert len(snap.json_payloads) == 0
+
+
+@pytest.mark.asyncio
+async def test_fetch_snapshot_not_blocked_when_captcha_seen_but_tickets_present(monkeypatch):
+    """Капча в ответах сети не считается блокировкой, если уже получен непустой список билетов."""
+    captcha_resp = FakeResponse(
+        url="https://smartcaptcha.yandexcloud.net/smartcaptcha.js",
+        body=b"var c = 1;",
+        headers={"content-type": "application/javascript"},
+    )
+    results_resp = FakeResponse(
+        url="https://aviasales.ru/search/v3.2/results?uuid=test",
+        body=b'{"chunk_id": "results", "tickets": [{"id": "t1"}], "is_over": true}',
+        headers={"content-type": "application/json"},
+    )
+    page = FakePage(responses_on_goto=[captcha_resp, results_resp])
+    ctx = FakeContext(page)
+    browser = FakeBrowser(ctx)
+    pw = FakePlaywrightManager(browser=browser)
+
+    monkeypatch.setattr("avia.collector.async_playwright", lambda: pw)
+
+    site = SiteConfig("test_site", "https://example.com", settle_ms=1000, scrolls=0)
+    snap = await fetch_snapshot("https://example.com", site)
+
+    # Наличие билетов снимает флаг блокировки
+    assert snap.blocked is False
+    assert len(snap.json_payloads) == 1
+    assert "/search/v3.2/results" in snap.json_payloads[0][0]
+
+
+@pytest.mark.asyncio
+async def test_fetch_snapshot_blocked_by_captcha_dom(monkeypatch):
+    """Наличие капчи в DOM (evaluate=True) без билетов приводит к snapshot.blocked=True."""
+    page = FakePage(evaluate_result=True)
+    ctx = FakeContext(page)
+    browser = FakeBrowser(ctx)
+    pw = FakePlaywrightManager(browser=browser)
+
+    monkeypatch.setattr("avia.collector.async_playwright", lambda: pw)
+
+    site = SiteConfig("test_site", "https://example.com", settle_ms=1000, scrolls=0)
+    snap = await fetch_snapshot("https://example.com", site)
+
+    assert snap.blocked is True
+
+
+@pytest.mark.asyncio
+async def test_fetch_snapshot_not_blocked_when_captcha_dom_but_tickets_present(monkeypatch):
+    """Капча в DOM не считается блокировкой, если билеты уже получены (капча поверх готовой выдачи)."""
+    results_resp = FakeResponse(
+        url="https://aviasales.ru/search/v3.2/results?uuid=test",
+        body=b'{"tickets": [{"id": "t1"}], "is_over": true}',
+        headers={"content-type": "application/json"},
+    )
+    page = FakePage(evaluate_result=True, responses_on_goto=[results_resp])
+    ctx = FakeContext(page)
+    browser = FakeBrowser(ctx)
+    pw = FakePlaywrightManager(browser=browser)
+
+    monkeypatch.setattr("avia.collector.async_playwright", lambda: pw)
+
+    site = SiteConfig("test_site", "https://example.com", settle_ms=1000, scrolls=0)
+    snap = await fetch_snapshot("https://example.com", site)
+
+    assert snap.blocked is False
+    assert len(snap.json_payloads) == 1
 
 
 # --- Тесты recon.py ---
