@@ -324,17 +324,6 @@ def _format_leg_details(
     return lines
 
 
-class _Card(str):
-    _compat_routes: tuple[str, ...] = ()
-
-    def __contains__(self, item: object) -> bool:
-        if super().__contains__(item):
-            return True
-        if isinstance(item, str) and item in self._compat_routes:
-            return True
-        return False
-
-
 def format_details(o: Offer, q: Query) -> str:
     """Формирует подробную карточку билета для отправки в чат."""
     lines = _format_leg_details(o, q.origin, q.destination, q.depart, is_back=False)
@@ -370,9 +359,4 @@ def format_details(o: Offer, q: Query) -> str:
         t_str = datetime.fromtimestamp(o.fetched_at).strftime("%H:%M")
         lines.append(f"Цена снята: {t_str}")
 
-    card = _Card("\n".join(lines).strip())
-    routes = [f"{q.origin} → {q.destination}"]
-    if o.back is not None:
-        routes.append(f"{q.destination} → {q.origin}")
-    card._compat_routes = tuple(routes)
-    return card
+    return "\n".join(lines).strip()
