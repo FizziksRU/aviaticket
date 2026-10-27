@@ -1,6 +1,6 @@
 from datetime import date
 
-from avia.formatting import format_report
+from avia.formatting import format_report, money
 from avia.models import Offer, Query, SiteResult
 
 
@@ -12,6 +12,6 @@ def test_identical_offers_shown_once_and_top_n_filled_with_unique():
     q = Query("MOW", "ALA", date(2026, 12, 12))
     offers = [_offer(16403)] * 3 + [_offer(17241, "19:30"), _offer(17500, "14:15")]
     text = format_report(q, [SiteResult("x", True, offers)], top_n=3)
-    assert text.count("16 403") == 2  # строка «Дешевле всего» + один пункт списка
+    assert text.count(money(16403, "RUB")) == 2  # строка «Дешевле всего» + один пункт списка
     assert text.count("•") == 3
-    assert "17 500" in text
+    assert money(17500, "RUB") in text
