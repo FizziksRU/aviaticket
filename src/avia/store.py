@@ -1,0 +1,62 @@
+from __future__ import annotations
+
+import time
+from dataclasses import dataclass
+from typing import Callable
+
+from .models import Offer, Query, SiteResult
+
+
+@dataclass
+class SearchSnapshot:
+    """Снимок последнего поиска для конкретного чата."""
+
+    query: Query
+    results: list[SiteResult]
+    baggage_mode: str
+    created_at: float
+    flat: list[Offer]
+
+    def offer_by_number(self, n: int) -> Offer | None:
+        """Возвращает билет по сквозному номеру из отчёта (нумерация с 1)."""
+        if 1 <= n <= len(self.flat):
+            return self.flat[n - 1]
+        return None
+
+
+class ResultStore:
+    """Хранилище результатов в памяти: бот один процесс; SQLite понадобится при реализации отслеживания."""
+
+    def __init__(self, ttl: float = 1800.0, clock: Callable[[], float] = time.time) -> None:
+        self._ttl = ttl
+        self._clock = clock
+        self._data: dict[int | str, SearchSnapshot] = {}
+
+    def put(
+        self,
+        chat_id: int | str,
+        query: Query,
+        results: list[SiteResult],
+        baggage_mode: str,
+        flat: list[Offer],
+    ) -> SearchSnapshot:
+        """Сохраняет снимок поиска чата."""
+        snapshot = SearchSnapshot(
+            query=query,
+            results=results,
+            baggage_mode=baggage_mode,
+            created_at=self._clock(),
+            flat=flat,
+        )
+        self._data[chat_id] = snapshot
+        return snapshot
+
+    def get(self, chat_id: int | str) -> SearchSnapshot | None:
+        """Возвращает снимок поиска или None, если он устарел (запись удаляется)."""
+        snapshot = self._data.get(chat_id)
+        if snapshot is None:
+            return None
+        if self._clock() - snapshot.created_at > self._ttl:
+            del self._data[chat_id]
+            return None
+        return snapshot
