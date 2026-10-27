@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import inspect
 import json
+import logging
 from pathlib import Path
 import re
 from dataclasses import dataclass, field
@@ -16,6 +17,8 @@ from dataclasses import dataclass, field
 from playwright.async_api import async_playwright
 
 from .config import SiteConfig
+
+logger = logging.getLogger(__name__)
 
 JSON_URL_HINT = re.compile(r"search|ticket|price|offer|fare|avia|flight|result", re.I)
 MAX_JSON_BYTES = 400_000
@@ -209,6 +212,111 @@ async def _safe_close(resource: object | None) -> None:
         pass
 
 
+REPLAY_FETCH_JS = """async ({ url, method, headers, body }) => {
+    try {
+        const resp = await fetch(url, {
+            method: method,
+            headers: headers,
+            body: body,
+            credentials: 'include',
+        });
+        const text = await resp.text();
+        return { status: resp.status, text: text };
+    } catch (err) {
+        return { status: 0, error: String(err) };
+    }
+}"""
+
+
+async def _replay_post_request(
+    page: object,
+    replay_cfg: dict,
+    captured_request: dict | None,
+    payloads: list[tuple[str, str]],
+) -> None:
+    """Выполняет один повтор POST-запроса из контекста страницы с изменённым телом."""
+    if not captured_request:
+        logger.warning("Повтор запроса пропущен: подходящий POST-запрос не был перехвачен")
+        return
+
+    req_url = captured_request.get("url")
+    req_method = captured_request.get("method", "POST")
+    post_data = captured_request.get("post_data")
+    content_type = captured_request.get("content_type", "")
+
+    if not req_url:
+        logger.warning("Повтор запроса пропущен: отсутствует URL")
+        return
+
+    if not post_data:
+        logger.warning("Повтор запроса пропущен: отсутствует post_data")
+        return
+
+    try:
+        data = json.loads(post_data)
+    except Exception:
+        logger.warning("Повтор запроса пропущен: post_data не является валидным JSON")
+        return
+
+    if not isinstance(data, dict):
+        logger.warning("Повтор запроса пропущен: JSON в post_data не является словарём")
+        return
+
+    set_fields = replay_cfg.get("set")
+    if isinstance(set_fields, dict):
+        data.update(set_fields)
+
+    try:
+        new_body = json.dumps(data, ensure_ascii=False)
+    except Exception:
+        logger.warning("Повтор запроса пропущен: сбой сериализации JSON")
+        return
+
+    headers: dict[str, str] = {}
+    if content_type:
+        headers["Content-Type"] = content_type
+
+    try:
+        if not hasattr(page, "evaluate") or not callable(getattr(page, "evaluate")):
+            logger.warning("Повтор запроса пропущен: page.evaluate недоступен")
+            return
+
+        res = page.evaluate(
+            REPLAY_FETCH_JS,
+            {
+                "url": req_url,
+                "method": req_method,
+                "headers": headers,
+                "body": new_body,
+            },
+        )
+        if inspect.isawaitable(res):
+            res = await res
+
+        if not isinstance(res, dict):
+            logger.warning("Повтор запроса: неожиданный результат evaluate")
+            return
+
+        status = res.get("status")
+        if status != 200:
+            logger.warning("Повтор запроса: HTTP-статус %s != 200", status)
+            return
+
+        text = res.get("text")
+        if not isinstance(text, str):
+            logger.warning("Повтор запроса: ответ не является строкой")
+            return
+
+        body_len = len(text.encode("utf-8"))
+        if body_len > MAX_RESULTS_BYTES:
+            logger.warning("Повтор запроса: размер ответа %d превышает MAX_RESULTS_BYTES", body_len)
+            return
+
+        payloads.append((req_url, text))
+    except Exception as e:
+        logger.warning("Повтор запроса: исключение при выполнении fetch (%s)", type(e).__name__)
+
+
 async def fetch_snapshot(
     url: str,
     site: SiteConfig,
@@ -247,6 +355,47 @@ async def fetch_snapshot(
                 )
 
             page = ctx.pages[0] if getattr(ctx, "pages", None) else await ctx.new_page()
+
+            captured_request: dict[str, Any] | None = None
+            if site.replay_post:
+                url_contains = site.replay_post.get("url_contains", "")
+
+                def on_request(req):
+                    nonlocal captured_request
+                    if captured_request is not None:
+                        return
+                    method = getattr(req, "method", "")
+                    if callable(method):
+                        method = method()
+                    if str(method).upper() != "POST":
+                        return
+                    req_url = getattr(req, "url", "")
+                    if callable(req_url):
+                        req_url = req_url()
+                    if url_contains and url_contains not in str(req_url):
+                        return
+                    headers = getattr(req, "headers", {})
+                    if callable(headers):
+                        headers = headers()
+                    content_type = ""
+                    if isinstance(headers, dict):
+                        content_type = headers.get("content-type") or headers.get("Content-Type") or ""
+                    post_data = getattr(req, "post_data", None)
+                    if callable(post_data):
+                        post_data = post_data()
+                    if isinstance(post_data, (bytes, bytearray)):
+                        try:
+                            post_data = post_data.decode("utf-8")
+                        except Exception:
+                            post_data = post_data.decode("utf-8", "replace")
+                    captured_request = {
+                        "url": str(req_url),
+                        "method": str(method),
+                        "post_data": post_data,
+                        "content_type": str(content_type),
+                    }
+
+                page.on("request", on_request)
 
             async def on_response(resp):
                 nonlocal captcha_seen
@@ -295,6 +444,14 @@ async def fetch_snapshot(
             text = await page.inner_text("body")
             final_url = page.url
             captcha_dom = await check_captcha_dom(page)
+
+            if site.replay_post:
+                has_t = has_search_tickets(payloads)
+                blocked_now = decide_blocked(text, captcha_seen, captcha_dom, has_t)
+                if not (blocked_now or captcha_seen or captcha_dom or is_blocked(text)):
+                    await _replay_post_request(page, site.replay_post, captured_request, payloads)
+                else:
+                    logger.warning("Повтор запроса пропущен: обнаружена капча или блокировка")
 
             if debug_dir:
                 d_dir = Path(debug_dir)

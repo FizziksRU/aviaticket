@@ -48,6 +48,13 @@ sites:
     url_template_rt: "https://avia.tutu.ru/f/{origin_seo}/{destination_seo}/?class=Y&travelers={adults}&route[0]={origin_id}-{ddmmyyyy}-{destination_id}&route[1]={destination_id}-{ddmmyyyy_ret}-{origin_id}"
     settle_ms: 20000
     scrolls: 2
+    replay_post:
+      url_contains: "/avia/offers/v2"
+      set:
+        sorting: cheapest
+        limit: 100
+        offset: 0
+        isNewSearch: false
 
   - name: yandex_travel
     source: browser

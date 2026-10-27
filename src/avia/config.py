@@ -27,6 +27,8 @@ class SiteConfig:
     # id_resolver: имя резолвера id (например, 'tutu' включает разрешение id городов)
     id_resolver: str = ""
     url_template_rt: str = ""
+    # replay_post: конфигурация повтора POST-запроса {"url_contains": "...", "set": {...}}
+    replay_post: dict | None = None
 
 
 @dataclass
