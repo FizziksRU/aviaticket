@@ -65,3 +65,14 @@ sites:
     url_template_rt: "https://travel.yandex.ru/avia/search/result/?adult_seats={adults}&children_seats=0&fromId={origin_id}&infant_seats=0&klass=economy&oneway=2&return_date={date_iso_ret}&salesChannel=B2C&toId={destination_id}&when={date_iso}"
     settle_ms: 30000
     scrolls: 1
+
+  # OneTwoTrip: шаблоны сняты с ссылки пользователя (дата туда ddmm, города, дата обратно ddmm; пассажиры в p=взр_дети_младенцы).
+  # Выключен, пока нет парсера (сначала recon).
+  - name: onetwotrip
+    source: browser
+    parser: onetwotrip
+    enabled: false
+    url_template: "https://www.onetwotrip.com/ru/f/search/{ddmm}{origin}{destination}?sc=E&p={adults}_0_0"
+    url_template_rt: "https://www.onetwotrip.com/ru/f/search/{ddmm}{origin}{destination}{ddmm_ret}?sc=E&p={adults}_0_0"
+    settle_ms: 25000
+    scrolls: 2
