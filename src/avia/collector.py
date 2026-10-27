@@ -30,6 +30,7 @@ BLOCK_MARKERS = (
     "вы не робот",
     "access denied",
     "are you a human",
+    "fab_chlg",  # Ozon: страница-заглушка «нет соединения» с номером инцидента
 )
 IS_OVER_RE = re.compile(r'"is_over"\s*:\s*(true\b|"true"|1\b)', re.I)
 LAST_UPDATE_ZERO_RE = re.compile(r'"last_update_timestamp"\s*:\s*0\b')

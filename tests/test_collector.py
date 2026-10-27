@@ -780,3 +780,10 @@ async def test_recon_profile_dir_and_blocked_message(monkeypatch, capsys):
     assert "сайт показал капчу: запустите с --show и пройдите её руками, сессия сохранится в state/profiles/aviasales" in captured
     # Путь профиля показан в выводе
     assert str(expected_profile) in captured
+
+
+def test_is_blocked_ozon_challenge_page():
+    from avia.collector import is_blocked
+
+    text = "Похоже, нет соединения\nИнцидент: fab_chlg_20261027011106_01M5XEJD20TBDT7PFFHPR8BP9T"
+    assert is_blocked(text)
