@@ -232,6 +232,9 @@ class Bot:
 
 def main():
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(message)s")
+    # httpx на уровне INFO пишет полный URL запроса, а в нём токен бота
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("httpcore").setLevel(logging.WARNING)
     asyncio.run(Bot(load_settings()).run())
 
 
