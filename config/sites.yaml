@@ -48,7 +48,9 @@ sites:
 
   - name: yandex_travel
     source: browser
-    enabled: false
-    url_template: "https://travel.yandex.ru/avia/search/result/?adult_seats=1&children_seats=0&fromId=c213&infant_seats=0&klass=economy&oneway=1&salesChannel=B2C&toId=c22177&when=2026-12-12"
+    parser: yandex_travel
+    id_resolver: yandex
+    enabled: true
+    url_template: "https://travel.yandex.ru/avia/search/result/?adult_seats={adults}&children_seats=0&fromId={origin_id}&infant_seats=0&klass=economy&oneway=1&salesChannel=B2C&toId={destination_id}&when={date_iso}"
     settle_ms: 30000
-    scrolls: 2
+    scrolls: 1

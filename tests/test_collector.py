@@ -13,6 +13,7 @@ from avia.collector import (
     LAST_UPDATE_ZERO_RE,
     MAX_JSON_BYTES,
     MAX_RESULTS_BYTES,
+    RESULTS_URL_MARKERS,
     Snapshot,
     check_captcha_dom,
     decide_blocked,
@@ -98,6 +99,31 @@ def test_should_save_response_other_urls():
     assert should_save_response("https://example.com/image.png", 50) is False
 
 
+def test_should_save_response_yandex_endpoint():
+    """Для URL Яндекс Путешествий (/api/avia/search/results) сохраняются ответы до MAX_RESULTS_BYTES."""
+    yandex_url = "https://travel.yandex.ru/api/avia/search/results?qid=123&cont=0"
+
+    # Ответы любой длины от 0 до MAX_RESULTS_BYTES (8 МБ) сохраняются без проверки JSON_URL_HINT
+    assert should_save_response(yandex_url, 0) is True
+    assert should_save_response(yandex_url, 150) is True
+    assert should_save_response(yandex_url, 500) is True
+    assert should_save_response(yandex_url, MAX_JSON_BYTES) is True
+    assert should_save_response(yandex_url, 1_700_000) is True  # типичный чанк Яндекса (~1.7 МБ)
+    assert should_save_response(yandex_url, MAX_RESULTS_BYTES) is True
+
+    # Свыше 8 МБ или отрицательная длина отбрасываются
+    assert should_save_response(yandex_url, MAX_RESULTS_BYTES + 1) is False
+    assert should_save_response(yandex_url, -1) is False
+
+    # Чужой URL работает по-старому (до 400 КБ и с хинтом)
+    foreign_hint = "https://example.com/search/fares"
+    foreign_no_hint = "https://example.com/static/bundle.js"
+    assert should_save_response(foreign_no_hint, 500) is False
+    assert should_save_response(foreign_hint, 10_000) is True
+    assert should_save_response(foreign_hint, MAX_JSON_BYTES + 1) is False
+    assert should_save_response(foreign_hint, MAX_RESULTS_BYTES) is False
+
+
 def test_has_is_over():
     """Проверка наличия признака 'is_over': true / 1 в теле ответа."""
     # Положительные срабатывания
@@ -156,6 +182,37 @@ def test_is_search_over():
     assert is_search_over([
         (results_url, '{"last_update_timestamp": 1690000000}'),
         (results_url, '{"last_update_timestamp": 0, "tickets": [{"id": "t1"}]}'),
+    ]) is True
+
+
+def test_is_search_over_yandex():
+    """Проверка завершения выдачи Яндекс Путешествий по cont и progress."""
+    yandex_url = "https://travel.yandex.ru/api/avia/search/results?qid=abc&cont=0"
+    other_url = "https://example.com/api/fares"
+
+    # 1. cont:1 progress 4/20 -> False
+    body_cont1 = '{"cont": 1, "progress": {"current": 4, "all": 20}}'
+    assert is_search_over([(yandex_url, body_cont1)]) is False
+
+    # 2. cont:null и 20/20 -> True
+    body_done = '{"cont": null, "progress": {"current": 20, "all": 20}}'
+    assert is_search_over([(yandex_url, body_done)]) is True
+
+    # 3. cont:null без progress -> True
+    body_no_progress = '{"cont": null, "tickets": []}'
+    assert is_search_over([(yandex_url, body_no_progress)]) is True
+
+    # 4. cont:null но 4/20 -> False
+    body_incomplete = '{"cont": null, "progress": {"current": 4, "all": 20}}'
+    assert is_search_over([(yandex_url, body_incomplete)]) is False
+
+    # cont:null на чужом URL не считается завершением
+    assert is_search_over([(other_url, body_done)]) is False
+
+    # Последовательность: промежуточный, затем финальный
+    assert is_search_over([
+        (yandex_url, body_cont1),
+        (yandex_url, body_done),
     ]) is True
 
 

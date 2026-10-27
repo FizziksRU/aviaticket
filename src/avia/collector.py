@@ -20,6 +20,10 @@ from .config import SiteConfig
 JSON_URL_HINT = re.compile(r"search|ticket|price|offer|fare|avia|flight|result", re.I)
 MAX_JSON_BYTES = 400_000
 MAX_RESULTS_BYTES = 8_000_000
+RESULTS_URL_MARKERS = (
+    "/search/v3.2/results",
+    "/api/avia/search/results",
+)
 BLOCK_MARKERS = (
     "captcha",
     "подтвердите, что вы не робот",
@@ -29,6 +33,8 @@ BLOCK_MARKERS = (
 )
 IS_OVER_RE = re.compile(r'"is_over"\s*:\s*(true\b|"true"|1\b)', re.I)
 LAST_UPDATE_ZERO_RE = re.compile(r'"last_update_timestamp"\s*:\s*0\b')
+YANDEX_CONT_NULL_RE = re.compile(r'"cont"\s*:\s*null')
+YANDEX_PROGRESS_RE = re.compile(r'"progress"\s*:\s*\{[^}]*"current"\s*:\s*(\d+)[^}]*"all"\s*:\s*(\d+)')
 CAPTCHA_URL_RE = re.compile(r"/captcha/|smartcaptcha", re.I)
 
 CAPTCHA_DOM_JS = """() => {
@@ -73,11 +79,11 @@ def is_blocked(text: str) -> bool:
 def should_save_response(url: str, length: int) -> bool:
     """Решает, нужно ли сохранять JSON-ответ по URL и длине тела.
 
-    Для URL '/search/v3.2/results' сохраняются ответы от 0 до MAX_RESULTS_BYTES.
+    Для URL из RESULTS_URL_MARKERS сохраняются ответы от 0 до MAX_RESULTS_BYTES.
     Для остальных URL проверяется совпадение с ключевыми словами и длина более 200 байт
     (не превышающая MAX_JSON_BYTES).
     """
-    if "/search/v3.2/results" in url:
+    if any(marker in url for marker in RESULTS_URL_MARKERS):
         return 0 <= length <= MAX_RESULTS_BYTES
     if not (0 <= length <= MAX_JSON_BYTES):
         return False
@@ -90,16 +96,22 @@ def has_is_over(body: str) -> bool:
 
 
 def is_search_over(payloads: list[tuple[str, str]]) -> bool:
-    r"""Проверяет, пришел ли завершающий ответ для /search/v3.2/results среди payloads.
+    r"""Проверяет, пришел ли завершающий ответ для Aviasales или Яндекс Путешествий среди payloads.
 
-    Возвращает True, если среди payloads для '/search/v3.2/results' есть ответ,
-    где регулярка r'"last_update_timestamp"\s*:\s*0\b' совпадает (число 0),
-    либо сработал старый признак is_over. Поиск выполняется по строке без json.loads.
+    Aviasales: ответ для '/search/v3.2/results', где last_update_timestamp == 0 или is_over == true/1.
+    Яндекс: ответ для '/api/avia/search/results', где "cont": null и (если есть progress) current == all.
+    Поиск выполняется по строке без json.loads.
     """
-    return any(
-        "/search/v3.2/results" in u and (bool(LAST_UPDATE_ZERO_RE.search(b)) or has_is_over(b))
-        for u, b in payloads
-    )
+    for url, body in payloads:
+        if "/search/v3.2/results" in url:
+            if LAST_UPDATE_ZERO_RE.search(body) or has_is_over(body):
+                return True
+        elif "/api/avia/search/results" in url:
+            if YANDEX_CONT_NULL_RE.search(body):
+                prog = YANDEX_PROGRESS_RE.search(body)
+                if prog is None or int(prog.group(1)) == int(prog.group(2)):
+                    return True
+    return False
 
 
 def is_captcha_url(url: str) -> bool:

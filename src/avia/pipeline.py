@@ -17,6 +17,7 @@ from .parsers import PARSERS
 from .parsers.travelpayouts import fetch_travelpayouts, search_url
 from .sites import build_url
 from .tutu_ids import resolve_city
+from .yandex_ids import city_id
 
 log = logging.getLogger("avia.pipeline")
 
@@ -79,6 +80,11 @@ async def _from_browser(site: SiteConfig, q: Query, settings: Settings) -> tuple
             "destination_id": dest_id,
             "origin_seo": origin_seo,
             "destination_seo": dest_seo,
+        }
+    elif site.id_resolver == "yandex":
+        extra = {
+            "origin_id": city_id(q.origin),
+            "destination_id": city_id(q.destination),
         }
     url = build_url(site, q, extra=extra)
     snap = await fetch_snapshot(
