@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from datetime import datetime
 import json
+import math
 from typing import Any
 
 from ..collector import Snapshot
@@ -400,7 +401,7 @@ def parse_onetwotrip(snapshot: Snapshot, query: Query) -> list[Offer]:
             if pair_key in seen_chains:
                 continue
             seen_chains.add(pair_key)
-            deduped.append((int(round(cost)), v0, v1))
+            deduped.append((math.ceil(round(cost, 2)), v0, v1))
             if len(deduped) >= 2000:
                 break
 
@@ -475,7 +476,7 @@ def parse_onetwotrip(snapshot: Snapshot, query: Query) -> list[Offer]:
             if amt is None:
                 continue
             try:
-                cost = int(round(float(amt)))
+                cost = math.ceil(round(float(amt), 2))
             except (ValueError, TypeError):
                 continue
             info0 = _parse_variant(v0, trips, equipment, cities, airports)

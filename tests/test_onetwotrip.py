@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from datetime import date
+import json
 from pathlib import Path
 import pytest
 
@@ -59,13 +60,16 @@ def test_parse_onetwotrip_roundtrip_prices_and_halves():
     assert prices == sorted(prices)
 
     # Минимальная цена туда-обратно НЕ меньше самой дешёвой готовой цены (30693.62 -> 30694)
-    # и не равна цене одной половинки (15130 — занижение вдвое)
+    # и не равна цене одной половинки (15131 — занижение вдвое, 15130.37 -> 15131)
     min_price = prices[0]
     assert min_price == 30694
-    assert min_price != 15130
+    assert min_price != 15131
 
     # Проверяем наличие пары «половинка туда» + «половинка обратно» (15130.37 + 15673.59 -> 30804)
     assert 30804 in prices
+
+    # Готовая цена с копейками округляется вверх (38016.2 -> 38017, ранее int(round(...)) давал 38016)
+    assert 38017 in prices
 
     # Проверяем базовые поля первого оффера
     first = offers[0]
@@ -219,3 +223,38 @@ def test_parse_onetwotrip_stable_and_distinct_offer_id():
         if (o.back.flight_numbers, o.back.depart_at) != (o0.back.flight_numbers, o0.back.depart_at)
     )
     assert compute_offer_id(o0) != compute_offer_id(o_diff)
+
+
+def test_parse_onetwotrip_price_ceil_rounding_and_float_noise():
+    """Проверка округления цен вверх (ceil) и защиты от float-шума: math.ceil(round(x, 2))."""
+    # 1. Готовая цена округляется вверх (38016.2 -> 38017)
+    q_rt = Query("KUF", "EVN", date(2026, 12, 2), return_date=date(2026, 12, 10))
+    snap_rt = make_snapshot()
+    offers_rt = parse_onetwotrip(snap_rt, q_rt)
+    prices_rt = [o.price for o in offers_rt]
+    assert 38017 in prices_rt
+    assert 38016 not in prices_rt
+
+    # 2. Сумма двух половинок складывается до округления: 15130.37 + 15673.59 = 30803.96 -> 30804
+    assert 30804 in prices_rt
+
+    # 3. Одиночная цена в одну сторону также округляется вверх (15130.37 -> 15131, 8921.72 -> 8922)
+    snap_ow = make_snapshot(fixture_name="search_ow_kuf_evn_0212.json")
+    q_ow = Query("KUF", "EVN", date(2026, 12, 2))
+    offers_ow = parse_onetwotrip(snap_ow, q_ow)
+    prices_ow = [o.price for o in offers_ow]
+    assert 15131 in prices_ow
+    assert 15130 not in prices_ow
+    assert min(prices_ow) == 8922
+
+    # 4. Защита от float-шума: 38016.00000000001 не должна округляться в 38017
+    raw = load_fixture_text("search_ow_kuf_evn_0212.json")
+    data = json.loads(raw)
+    first_pid = next(iter(data["prices"]))
+    data["prices"][first_pid]["totalAmount"] = 38016.00000000001
+    snap_noise = make_snapshot(payloads=[(SEARCH_URL, json.dumps(data))])
+    offers_noise = parse_onetwotrip(snap_noise, q_ow)
+    noise_prices = [o.price for o in offers_noise]
+    assert 38016 in noise_prices
+    assert 38017 not in noise_prices
+
