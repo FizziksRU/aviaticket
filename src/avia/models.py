@@ -49,6 +49,7 @@ class Offer:
     carry_on: str | None = None
     fetched_at: float | None = None
     back: Leg | None = None
+    url_is_direct: bool = False
 
 
 @dataclass

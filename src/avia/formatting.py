@@ -262,7 +262,18 @@ def format_details(o: Offer, q: Query) -> str:
     lines.append(f"Сайт: {escape(o.site)}")
 
     if o.url:
-        lines.append(f'Ссылка: <a href="{escape(o.url, quote=True)}">купить билет</a>')
+        caption = "купить билет" if o.url_is_direct else "открыть выдачу сайта"
+        lines.append(f'Ссылка: <a href="{escape(o.url, quote=True)}">{caption}</a>')
+        if not o.url_is_direct:
+            criteria: list[str] = []
+            has_time = bool(o.depart_time or o.depart_at or (o.back and (o.back.depart_time or o.back.depart_at)))
+            has_fn = bool(o.flight_numbers or (o.back and o.back.flight_numbers))
+            if has_time:
+                criteria.append("времени вылета")
+            if has_fn:
+                criteria.append("номеру рейса")
+            if criteria:
+                lines.append(f"Найдите рейс в выдаче по {' и '.join(criteria)}")
 
     if o.fetched_at is not None:
         t_str = datetime.fromtimestamp(o.fetched_at).strftime("%H:%M")

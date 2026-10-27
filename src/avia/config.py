@@ -26,6 +26,7 @@ class SiteConfig:
     use_llm: bool = False
     # id_resolver: имя резолвера id (например, 'tutu' включает разрешение id городов)
     id_resolver: str = ""
+    url_template_rt: str = ""
 
 
 @dataclass

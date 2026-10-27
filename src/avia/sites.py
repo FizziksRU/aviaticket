@@ -13,6 +13,15 @@ def build_url(site: SiteConfig, q: Query, extra: dict[str, str] | None = None) -
         "ddmmyyyy": q.depart.strftime("%d%m%Y"),
         "adults": q.adults,
     }
+    if q.return_date:
+        if not site.url_template_rt:
+            raise ValueError("для этого сайта обратные билеты пока не поддерживаются")
+        template = site.url_template_rt
+        params["date_iso_ret"] = q.return_date.isoformat()
+        params["ddmm_ret"] = q.return_date.strftime("%d%m")
+        params["ddmmyyyy_ret"] = q.return_date.strftime("%d%m%Y")
+    else:
+        template = site.url_template
     if extra:
         params.update(extra)
-    return site.url_template.format(**params)
+    return template.format(**params)

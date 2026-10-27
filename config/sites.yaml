@@ -23,6 +23,7 @@ sites:
     parser: aviasales
     enabled: true
     url_template: "https://www.aviasales.ru/search/{origin}{ddmm}{destination}{adults}"
+    url_template_rt: "https://www.aviasales.ru/search/{origin}{ddmm}{destination}{ddmm_ret}{adults}"
     settle_ms: 25000
     scrolls: 4
     note: "выдача грузится 30-60 секунд, поэтому большой settle_ms"

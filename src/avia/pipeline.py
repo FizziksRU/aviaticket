@@ -135,6 +135,7 @@ async def _from_browser(site: SiteConfig, q: Query, settings: Settings) -> tuple
             )
 
     for o in offers:
+        o.url_is_direct = bool(o.url and o.url != snap.url)
         o.url = o.url or snap.url
     return sorted(offers, key=lambda o: o.price), snap.url, partial
 
@@ -146,6 +147,13 @@ async def _run_site(
     *,
     guard: SearchGuard | None = None,
 ) -> SiteResult:
+    if q.return_date and not site.url_template_rt:
+        return SiteResult(
+            site=site.name,
+            ok=False,
+            offers=[],
+            error="для этого сайта обратные билеты пока не поддерживаются",
+        )
     t0 = time.monotonic()
     g = guard if guard is not None else globals()["guard"]
 
@@ -211,6 +219,13 @@ async def search(
     g = guard if guard is not None else globals()["guard"]
 
     async def guarded(s: SiteConfig) -> SiteResult:
+        if q.return_date and not s.url_template_rt:
+            return SiteResult(
+                site=s.name,
+                ok=False,
+                offers=[],
+                error="для этого сайта обратные билеты пока не поддерживаются",
+            )
         async with sem:
             return await _run_site(s, q, settings, guard=g)
 
