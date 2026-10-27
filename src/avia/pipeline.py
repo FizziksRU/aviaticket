@@ -34,13 +34,18 @@ class ParserEmptyError(Exception):
         self.page_url = page_url
 
 
-def _save_empty_snapshot(site: SiteConfig, snap: Snapshot, settings: Settings) -> None:
-    """Сохраняет отладочный снимок при 0 вариантов и непустой странице (без токенов)."""
+def _save_empty_snapshot(
+    site: SiteConfig,
+    snap: Snapshot,
+    settings: Settings,
+    tag: str = "empty",
+) -> None:
+    """Сохраняет отладочный снимок при 0 вариантов или неверных датах (без токенов)."""
     try:
         debug_dir = Path(settings.debug_dir)
         debug_dir.mkdir(parents=True, exist_ok=True)
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-        target = debug_dir / f"{site.name}_empty_{ts}.json"
+        target = debug_dir / f"{site.name}_{tag}_{ts}.json"
 
         data = {
             "url": snap.url,
@@ -61,6 +66,39 @@ def _save_empty_snapshot(site: SiteConfig, snap: Snapshot, settings: Settings) -
         target.write_text(content, encoding="utf-8")
     except Exception as e:
         log.warning("Не удалось сохранить отладочный снимок для %s: %s", site.name, e)
+
+
+def filter_wrong_dates(offers: list[Offer], q: Query) -> tuple[list[Offer], int]:
+    """Оставляет только офферы с датами вылета, соответствующими запросу.
+
+    - offer.depart_at (первые 10 символов, ISO YYYY-MM-DD) == q.depart.isoformat()
+    - если q.return_date задан и у оффера есть back с back.depart_at:
+      back.depart_at[:10] == q.return_date.isoformat()
+    Если depart_at или back.depart_at пусты (None) — оффер не отбрасывается.
+    Возвращает (оставшиеся офферы, число отброшенных).
+    """
+    kept: list[Offer] = []
+    dropped = 0
+    depart_iso = q.depart.isoformat()
+    return_iso = q.return_date.isoformat() if q.return_date else None
+
+    for offer in offers:
+        if offer.depart_at and offer.depart_at[:10] != depart_iso:
+            dropped += 1
+            continue
+
+        if (
+            return_iso
+            and offer.back
+            and offer.back.depart_at
+            and offer.back.depart_at[:10] != return_iso
+        ):
+            dropped += 1
+            continue
+
+        kept.append(offer)
+
+    return kept, dropped
 
 
 async def _from_api(site: SiteConfig, q: Query, settings: Settings) -> tuple[list[Offer], str | None]:
@@ -139,6 +177,17 @@ async def _from_browser(site: SiteConfig, q: Query, settings: Settings) -> tuple
                 "формат выдачи мог измениться, 0 вариантов при непустой странице",
                 page_url=snap.url,
             )
+
+    had_offers = bool(offers)
+    offers, dropped = filter_wrong_dates(offers, q)
+    if dropped > 0:
+        log.warning("Сайт %s: отброшено %d офферов с неверными датами", site.name, dropped)
+    if not offers and had_offers:
+        _save_empty_snapshot(site, snap, settings, tag="wrongdates")
+        raise ParserEmptyError(
+            "сайт вернул билеты на другие даты, а не на запрошенные",
+            page_url=snap.url,
+        )
 
     for o in offers:
         o.url_is_direct = bool(o.url and o.url != snap.url)
