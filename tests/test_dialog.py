@@ -3,6 +3,7 @@ from html import escape
 
 import pytest
 
+import avia.dialog
 from avia.dialog import (
     Dialog,
     Reply,
@@ -85,7 +86,7 @@ def test_dialog_one_way_success():
     assert session.step == Step.SEARCHING
 
 
-def test_dialog_round_trip_and_soon_message():
+def test_dialog_round_trip_and_soon_message(monkeypatch):
     """Путь «туда-обратно» с датой возврата и сообщением про «скоро»."""
     dialog = make_dialog()
     chat_id = 102
@@ -110,7 +111,8 @@ def test_dialog_round_trip_and_soon_message():
     assert session.step == Step.BAGGAGE
     assert session.return_date == date(2026, 12, 20)
 
-    # Выбор багажа: так как ROUND_TRIP_SITES пуст, показывается предупреждение
+    # Выбор багажа: если ни один сайт не умеет туда-обратно, показывается предупреждение
+    monkeypatch.setattr(avia.dialog, "ROUND_TRIP_SITES", frozenset())
     rep = dialog.on_callback(chat_id, f"bag:{d_id}:any")
     assert len(rep) == 1
     assert isinstance(rep[0], Reply)
@@ -317,7 +319,7 @@ def test_dialog_expired_button():
     assert rep_track[0].answer == "Скоро"
 
 
-def test_dialog_all_callback_data_len_le_64():
+def test_dialog_all_callback_data_len_le_64(monkeypatch):
     """Все сгенерированные callback_data <= 64 байт в кодировке UTF-8."""
     dialog = make_dialog()
     chat_id = 106
@@ -362,7 +364,8 @@ def test_dialog_all_callback_data_len_le_64():
     rep = dialog.on_text(chat_id, "20.12.2026")
     check_keyboard(rep[0].keyboard)
 
-    # Предупреждение о туда-обратно
+    # Предупреждение о туда-обратно (когда ни один сайт не умеет)
+    monkeypatch.setattr(avia.dialog, "ROUND_TRIP_SITES", frozenset())
     rep = dialog.on_callback(chat_id, f"bag:{d_id}:with")
     check_keyboard(rep[0].keyboard)
 
