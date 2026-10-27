@@ -61,11 +61,12 @@ import re
 from typing import Any
 
 from ..collector import Snapshot
-from ..models import Offer, Query
+from ..models import Leg, Offer, Query
 from . import register_parser
 from .travelpayouts import format_duration
 
 _BAGGAGE_PIECES_RE = re.compile(r"^(\d+)[a-zA-Z]")
+_CARRY_ON_PIECES_RE = re.compile(r"^\d+[a-zA-Z](\d+)")
 
 
 def _parse_baggage_pieces(code: str) -> int:
@@ -85,9 +86,26 @@ def _has_baggage(
     best_price: dict[str, Any],
     first_flight: dict[str, Any] | None,
     company_tariffs: dict[Any, dict[str, Any]],
+    is_roundtrip: bool = False,
 ) -> bool:
     """Определяет, включен ли багаж в выбранное ценовое предложение."""
     baggage_data = best_price.get("baggage")
+    if is_roundtrip:
+        if (
+            isinstance(baggage_data, list)
+            and len(baggage_data) >= 2
+            and isinstance(baggage_data[0], list)
+            and isinstance(baggage_data[1], list)
+            and baggage_data[0]
+            and baggage_data[1]
+        ):
+            for leg in (baggage_data[0], baggage_data[1]):
+                for code in leg:
+                    if not isinstance(code, str) or _parse_baggage_pieces(code) <= 0:
+                        return False
+            return True
+        return False
+
     if (
         isinstance(baggage_data, list)
         and len(baggage_data) > 0
@@ -108,6 +126,59 @@ def _has_baggage(
                 return True
 
     return False
+
+
+def _get_carry_on(best_price: dict[str, Any]) -> str | None:
+    """Определяет наличие ручной клади по второй цифре кода baggage первого рейса."""
+    baggage_data = best_price.get("baggage")
+    if (
+        isinstance(baggage_data, list)
+        and len(baggage_data) > 0
+        and isinstance(baggage_data[0], list)
+        and baggage_data[0]
+    ):
+        first_code = baggage_data[0][0]
+        if isinstance(first_code, str):
+            m = _CARRY_ON_PIECES_RE.match(first_code)
+            if m:
+                try:
+                    cnt = int(m.group(1))
+                    return "ручная кладь есть" if cnt > 0 else "ручная кладь нет"
+                except (ValueError, TypeError):
+                    return None
+    return None
+
+
+def _format_iso_datetime(dt_str: str | None) -> str | None:
+    """Преобразует строку даты/времени в формат ISO 'YYYY-MM-DDTHH:MM'."""
+    if not dt_str or not isinstance(dt_str, str):
+        return None
+    cleaned = dt_str.strip()
+    if not cleaned:
+        return None
+    if " " in cleaned:
+        cleaned = cleaned.replace(" ", "T", 1)
+    if "T" in cleaned:
+        parts = cleaned.split("T", 1)
+        date_part = parts[0]
+        time_part = parts[1][:5]
+        if len(date_part) == 10 and len(time_part) == 5:
+            return f"{date_part}T{time_part}"
+    return cleaned[:16] if len(cleaned) >= 16 else cleaned
+
+
+def _format_layover_time(diff_sec: float | int) -> str:
+    """Форматирует длительность пересадки вида '2 ч 10 мин', '16 ч' или '45 мин'."""
+    if diff_sec <= 0:
+        return "0 мин"
+    diff_min = int(round(diff_sec / 60))
+    h = diff_min // 60
+    m = diff_min % 60
+    if h > 0 and m > 0:
+        return f"{h} ч {m} мин"
+    if h > 0:
+        return f"{h} ч"
+    return f"{m} мин"
 
 
 def _extract_time(dt_str: Any) -> str | None:
@@ -248,6 +319,152 @@ def results_complete(snapshot: Snapshot | None) -> bool:
     return False
 
 
+def _parse_leg(
+    flight_keys: tuple[str, ...],
+    flights_ref: dict[str, Any],
+    companies_ref: dict[Any, dict[str, Any]],
+    avia_companies_ref: dict[Any, dict[str, Any]],
+    stations_ref: dict[Any, dict[str, Any]],
+    settlements_ref: dict[Any, dict[str, Any]],
+) -> dict[str, Any] | None:
+    """Разбирает плечо перелёта (последовательность ключей рейсов) и возвращает словарь атрибутов."""
+    if not flight_keys:
+        return None
+    first_key = flight_keys[0]
+    last_key = flight_keys[-1]
+    f0 = flights_ref.get(first_key)
+    f_last = flights_ref.get(last_key)
+    if not f0 or not f_last:
+        return None
+
+    airline = _get_airline_name(f0, companies_ref, avia_companies_ref)
+    if not airline:
+        for k in flight_keys[1:]:
+            fl = flights_ref.get(k)
+            if fl:
+                airline = _get_airline_name(fl, companies_ref, avia_companies_ref)
+                if airline:
+                    break
+
+    f0_dep = f0.get("departure") if isinstance(f0.get("departure"), dict) else {}
+    flast_arr = f_last.get("arrival") if isinstance(f_last.get("arrival"), dict) else {}
+
+    dep_local = f0_dep.get("local")
+    arr_local = flast_arr.get("local")
+
+    depart_time = _extract_time(dep_local)
+    arrive_time = _extract_time(arr_local)
+    duration = _calculate_duration(f0.get("departure"), f_last.get("arrival"))
+    transfers = len(flight_keys) - 1
+
+    # Номера рейсов ("FV 6949")
+    fn_list: list[str] = []
+    for k in flight_keys:
+        fl = flights_ref.get(k)
+        if isinstance(fl, dict):
+            num = fl.get("number")
+            if num and isinstance(num, str):
+                s_num = num.strip()
+                if s_num:
+                    fn_list.append(s_num)
+    flight_numbers = fn_list if fn_list else None
+
+    # Самолёты
+    ac_list: list[str] = []
+    for k in flight_keys:
+        fl = flights_ref.get(k)
+        if isinstance(fl, dict):
+            for field in ("aircraft", "tModel", "equipment", "plane"):
+                val = fl.get(field)
+                if not val:
+                    continue
+                ac_name = None
+                if isinstance(val, dict):
+                    ac_name = val.get("title") or val.get("name")
+                elif isinstance(val, str):
+                    ac_name = val.strip()
+                if ac_name and isinstance(ac_name, str) and ac_name not in ac_list:
+                    ac_list.append(ac_name)
+    aircraft = ", ".join(ac_list) if ac_list else None
+
+    # Пересадки (layovers)
+    layover_list: list[str] = []
+    if len(flight_keys) > 1:
+        for i in range(len(flight_keys) - 1):
+            prev_fl = flights_ref.get(flight_keys[i])
+            next_fl = flights_ref.get(flight_keys[i + 1])
+            if not prev_fl or not next_fl:
+                continue
+            arr_st_id = prev_fl.get("to")
+            station = stations_ref.get(arr_st_id)
+            place = ""
+            if station and isinstance(station, dict):
+                settle_id = station.get("settlement")
+                settle = settlements_ref.get(settle_id) if settle_id is not None else None
+                if settle and isinstance(settle, dict) and settle.get("title"):
+                    place = str(settle["title"])
+                elif station.get("title"):
+                    place = str(station["title"])
+                elif station.get("code"):
+                    place = str(station["code"])
+            if not place and arr_st_id is not None:
+                place = str(arr_st_id)
+
+            p_arr = prev_fl.get("arrival") if isinstance(prev_fl.get("arrival"), dict) else {}
+            n_dep = next_fl.get("departure") if isinstance(next_fl.get("departure"), dict) else {}
+            diff_sec = None
+            p_loc = p_arr.get("local")
+            n_loc = n_dep.get("local")
+            p_off = p_arr.get("offset")
+            n_off = n_dep.get("offset")
+            if (
+                isinstance(p_loc, str)
+                and isinstance(n_loc, str)
+                and isinstance(p_off, (int, float))
+                and not isinstance(p_off, bool)
+                and isinstance(n_off, (int, float))
+                and not isinstance(n_off, bool)
+            ):
+                try:
+                    p_dt = datetime.fromisoformat(p_loc).replace(
+                        tzinfo=timezone(timedelta(minutes=int(p_off)))
+                    )
+                    n_dt = datetime.fromisoformat(n_loc).replace(
+                        tzinfo=timezone(timedelta(minutes=int(n_off)))
+                    )
+                    diff = (n_dt - p_dt).total_seconds()
+                    if diff >= 0:
+                        diff_sec = diff
+                except (ValueError, TypeError):
+                    pass
+
+            time_str = _format_layover_time(diff_sec) if diff_sec is not None else ""
+            if place and time_str:
+                layover_list.append(f"{place}, {time_str}")
+            elif place:
+                layover_list.append(place)
+            elif time_str:
+                layover_list.append(time_str)
+
+    layovers = layover_list if layover_list else None
+    depart_at = _format_iso_datetime(dep_local)
+    arrive_at = _format_iso_datetime(arr_local)
+
+    return {
+        "f0": f0,
+        "airline": airline,
+        "depart_time": depart_time,
+        "arrive_time": arrive_time,
+        "duration": duration,
+        "transfers": transfers,
+        "flight_numbers": flight_numbers,
+        "aircraft": aircraft,
+        "layovers": layovers,
+        "depart_at": depart_at,
+        "arrive_at": arrive_at,
+    }
+
+
 @register_parser("yandex_travel")
 def parse_yandex_travel(snapshot: Snapshot, query: Query) -> list[Offer]:
     """Разбирает JSON-ответы Яндекс Путешествий (/api/avia/search/results) из snapshot в список Offer."""
@@ -258,6 +475,8 @@ def parse_yandex_travel(snapshot: Snapshot, query: Query) -> list[Offer]:
     companies_ref: dict[Any, dict[str, Any]] = {}
     avia_companies_ref: dict[Any, dict[str, Any]] = {}
     company_tariffs_ref: dict[Any, dict[str, Any]] = {}
+    stations_ref: dict[Any, dict[str, Any]] = {}
+    settlements_ref: dict[Any, dict[str, Any]] = {}
 
     valid_chunks: list[dict[str, Any]] = []
     seen_portions: set[Any] = set()
@@ -282,24 +501,60 @@ def parse_yandex_travel(snapshot: Snapshot, query: Query) -> list[Offer]:
                     for fl in flights:
                         if isinstance(fl, dict) and "key" in fl:
                             flights_ref[str(fl["key"])] = fl
+                elif isinstance(flights, dict):
+                    for k, fl in flights.items():
+                        if isinstance(fl, dict):
+                            flights_ref[str(fl.get("key", k))] = fl
 
                 companies = ref.get("companies")
                 if isinstance(companies, list):
                     for c in companies:
                         if isinstance(c, dict) and "id" in c:
                             companies_ref[c["id"]] = c
+                elif isinstance(companies, dict):
+                    for k, c in companies.items():
+                        if isinstance(c, dict):
+                            companies_ref[c.get("id", k)] = c
 
                 avia_companies = ref.get("aviaCompanies")
                 if isinstance(avia_companies, list):
                     for ac in avia_companies:
                         if isinstance(ac, dict) and "id" in ac:
                             avia_companies_ref[ac["id"]] = ac
+                elif isinstance(avia_companies, dict):
+                    for k, ac in avia_companies.items():
+                        if isinstance(ac, dict):
+                            avia_companies_ref[ac.get("id", k)] = ac
 
                 company_tariffs = ref.get("companyTariffs")
                 if isinstance(company_tariffs, list):
                     for ct in company_tariffs:
                         if isinstance(ct, dict) and "id" in ct:
                             company_tariffs_ref[ct["id"]] = ct
+                elif isinstance(company_tariffs, dict):
+                    for k, ct in company_tariffs.items():
+                        if isinstance(ct, dict):
+                            company_tariffs_ref[ct.get("id", k)] = ct
+
+                stations = ref.get("stations")
+                if isinstance(stations, list):
+                    for s in stations:
+                        if isinstance(s, dict) and "id" in s:
+                            stations_ref[s["id"]] = s
+                elif isinstance(stations, dict):
+                    for k, s in stations.items():
+                        if isinstance(s, dict):
+                            stations_ref[s.get("id", k)] = s
+
+                settlements = ref.get("settlements")
+                if isinstance(settlements, list):
+                    for se in settlements:
+                        if isinstance(se, dict) and "id" in se:
+                            settlements_ref[se["id"]] = se
+                elif isinstance(settlements, dict):
+                    for k, se in settlements.items():
+                        if isinstance(se, dict):
+                            settlements_ref[se.get("id", k)] = se
 
             # Дедупликация повторной подачи одной и той же порции
             cont = data.get("cont")
@@ -338,6 +593,7 @@ def parse_yandex_travel(snapshot: Snapshot, query: Query) -> list[Offer]:
         except Exception:
             continue
 
+    is_roundtrip = query.return_date is not None
     offers: list[Offer] = []
 
     for data in valid_chunks:
@@ -348,9 +604,9 @@ def parse_yandex_travel(snapshot: Snapshot, query: Query) -> list[Offer]:
         if not isinstance(fares, list):
             continue
 
-        # Внутри порции дедуплицируем тарифы по ключу route,
+        # Внутри порции дедуплицируем тарифы по ключу route (учитывая оба плеча),
         # сохраняя предложение с наименьшей ценой
-        best_fares_for_chunk: dict[tuple, tuple[int, dict[str, Any], tuple[str, ...]]] = {}
+        best_fares_for_chunk: dict[tuple, tuple[int, dict[str, Any], tuple[tuple[str, ...], ...]]] = {}
 
         for fare in fares:
             if not isinstance(fare, dict):
@@ -365,10 +621,15 @@ def parse_yandex_travel(snapshot: Snapshot, query: Query) -> list[Offer]:
                     if isinstance(leg, list):
                         filtered_leg = tuple(str(k) for k in leg if k is not None)
                         legs_key.append(filtered_leg)
-                if not legs_key or not legs_key[0]:
-                    continue
+
+                if is_roundtrip:
+                    if len(legs_key) < 2 or not legs_key[0] or not legs_key[1]:
+                        continue
+                else:
+                    if not legs_key or not legs_key[0]:
+                        continue
+
                 route_key = tuple(legs_key)
-                first_leg = legs_key[0]
 
                 prices = fare.get("prices")
                 if not isinstance(prices, list) or not prices:
@@ -402,18 +663,49 @@ def parse_yandex_travel(snapshot: Snapshot, query: Query) -> list[Offer]:
                     route_key not in best_fares_for_chunk
                     or best_price < best_fares_for_chunk[route_key][0]
                 ):
-                    best_fares_for_chunk[route_key] = (best_price, best_prop, first_leg)
+                    best_fares_for_chunk[route_key] = (best_price, best_prop, route_key)
             except Exception:
                 continue
 
-        for (price, best_prop, first_leg) in best_fares_for_chunk.values():
+        for (price, best_prop, route_key) in best_fares_for_chunk.values():
             try:
-                first_key = first_leg[0]
-                last_key = first_leg[-1]
-                f0 = flights_ref.get(first_key)
-                f_last = flights_ref.get(last_key)
-                if not f0 or not f_last:
+                out_leg = route_key[0]
+                out_info = _parse_leg(
+                    out_leg,
+                    flights_ref,
+                    companies_ref,
+                    avia_companies_ref,
+                    stations_ref,
+                    settlements_ref,
+                )
+                if not out_info:
                     continue
+
+                back_leg_obj: Leg | None = None
+                if is_roundtrip:
+                    back_leg = route_key[1]
+                    back_info = _parse_leg(
+                        back_leg,
+                        flights_ref,
+                        companies_ref,
+                        avia_companies_ref,
+                        stations_ref,
+                        settlements_ref,
+                    )
+                    if not back_info:
+                        continue
+                    back_leg_obj = Leg(
+                        airline=back_info["airline"],
+                        depart_time=back_info["depart_time"],
+                        arrive_time=back_info["arrive_time"],
+                        duration=back_info["duration"],
+                        transfers=back_info["transfers"],
+                        flight_numbers=back_info["flight_numbers"],
+                        aircraft=back_info["aircraft"],
+                        layovers=back_info["layovers"],
+                        depart_at=back_info["depart_at"],
+                        arrive_at=back_info["arrive_at"],
+                    )
 
                 curr = best_prop.get("tariff", {}).get("currency")
                 if str(curr).upper() in ("RUR", "RUB"):
@@ -421,37 +713,37 @@ def parse_yandex_travel(snapshot: Snapshot, query: Query) -> list[Offer]:
                 else:
                     currency = str(curr or query.currency or "RUB").upper()
 
-                transfers = len(first_leg) - 1
-                airline = _get_airline_name(f0, companies_ref, avia_companies_ref)
-                dep_time = _extract_time(
-                    f0.get("departure", {}).get("local")
-                    if isinstance(f0.get("departure"), dict)
-                    else None
-                )
-                arrive_time = _extract_time(
-                    f_last.get("arrival", {}).get("local")
-                    if isinstance(f_last.get("arrival"), dict)
-                    else None
-                )
-                duration = _calculate_duration(f0.get("departure"), f_last.get("arrival"))
                 baggage = (
                     "с багажом"
-                    if _has_baggage(best_prop, f0, company_tariffs_ref)
+                    if _has_baggage(
+                        best_prop,
+                        out_info["f0"],
+                        company_tariffs_ref,
+                        is_roundtrip=is_roundtrip,
+                    )
                     else "без багажа"
                 )
+                carry_on = _get_carry_on(best_prop)
 
                 offers.append(
                     Offer(
                         site="yandex_travel",
                         price=price,
                         currency=currency,
-                        airline=airline,
-                        depart_time=dep_time,
-                        arrive_time=arrive_time,
-                        duration=duration,
-                        transfers=transfers,
+                        airline=out_info["airline"],
+                        depart_time=out_info["depart_time"],
+                        arrive_time=out_info["arrive_time"],
+                        duration=out_info["duration"],
+                        transfers=out_info["transfers"],
                         baggage=baggage,
                         url=None,
+                        flight_numbers=out_info["flight_numbers"],
+                        aircraft=out_info["aircraft"],
+                        layovers=out_info["layovers"],
+                        depart_at=out_info["depart_at"],
+                        arrive_at=out_info["arrive_at"],
+                        carry_on=carry_on,
+                        back=back_leg_obj,
                     )
                 )
             except Exception:
