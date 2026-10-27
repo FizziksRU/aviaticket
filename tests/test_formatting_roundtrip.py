@@ -8,6 +8,7 @@ from avia.models import Leg, Offer, Query, SiteResult
 
 
 def _check_html_tags_balanced(text: str) -> None:
+    assert "<!--" not in text
     assert text.count("<b>") == text.count("</b>")
     assert text.count("<i>") == text.count("</i>")
     assert len(re.findall(r"<a\b", text)) == text.count("</a>")
@@ -172,6 +173,20 @@ def test_roundtrip_offer_line_duration_omitted_when_longer_than_160():
     # Времена и пересадки должны остаться
     assert "туда 10:00→15:30 (пересадок: 2)" in line_long
     assert "обратно 18:00→23:45 (пересадок: 3)" in line_long
+
+
+def test_roundtrip_offer_line_empty_leg_brief():
+    """Если у плеча нет данных о времени, длительности и пересадках, 'туда'/'обратно' не показываются."""
+    o = Offer(
+        site="site",
+        price=10000,
+        airline="Airline",
+        back=Leg(),
+    )
+    line = offer_line(o)
+    assert line == "<b>10 000 ₽</b> · Airline"
+    assert "туда" not in line
+    assert "обратно" not in line
 
 
 def test_oneway_offer_line_unchanged():

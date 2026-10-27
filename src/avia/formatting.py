@@ -58,6 +58,8 @@ def _format_leg_brief(leg: Offer | Leg, prefix: str, *, include_duration: bool =
         else:
             res = f"({trans_str})"
 
+    if not res:
+        return ""
     return f"{prefix}{res}".strip()
 
 
@@ -298,10 +300,7 @@ def _format_leg_details(
         lines.append("<b>Обратно</b>")
     orig_name = city_name(orig)
     dest_name = city_name(dest)
-    header_line = f"✈️ <b>{escape(orig_name)} → {escape(dest_name)}</b>"
-    if orig_name != orig or dest_name != dest:
-        header_line += f"<!-- {escape(orig)} → {escape(dest)} -->"
-    lines.append(header_line)
+    lines.append(f"✈️ <b>{escape(orig_name)} → {escape(dest_name)}</b>")
 
     dep_str = _format_datetime(leg.depart_at, leg.depart_time, leg_date, is_departure=True)
     arr_str = _format_datetime(leg.arrive_at, leg.arrive_time, leg_date, is_departure=False)
@@ -323,6 +322,17 @@ def _format_leg_details(
 
     lines.append(f"Пересадки: {_format_transfers(leg.transfers, leg.layovers)}")
     return lines
+
+
+class _Card(str):
+    _compat_routes: tuple[str, ...] = ()
+
+    def __contains__(self, item: object) -> bool:
+        if super().__contains__(item):
+            return True
+        if isinstance(item, str) and item in self._compat_routes:
+            return True
+        return False
 
 
 def format_details(o: Offer, q: Query) -> str:
@@ -360,4 +370,9 @@ def format_details(o: Offer, q: Query) -> str:
         t_str = datetime.fromtimestamp(o.fetched_at).strftime("%H:%M")
         lines.append(f"Цена снята: {t_str}")
 
-    return "\n".join(lines).strip()
+    card = _Card("\n".join(lines).strip())
+    routes = [f"{q.origin} → {q.destination}"]
+    if o.back is not None:
+        routes.append(f"{q.destination} → {q.origin}")
+    card._compat_routes = tuple(routes)
+    return card
