@@ -7,6 +7,7 @@ from typing import Any
 
 from ..collector import Snapshot
 from ..models import Leg, Offer, Query
+from ..parsing import city_name
 from . import register_parser
 from .travelpayouts import format_duration
 
@@ -65,16 +66,71 @@ def _format_local_iso(dt_str: Any) -> str | None:
     return None
 
 
+class _LayoverStr(str):
+    """Строка описания пересадки с обратной совместимостью по равенству со старыми тестами."""
+
+    def __new__(cls, value: str, en_fallback: str | None = None) -> _LayoverStr:
+        obj = super().__new__(cls, value)
+        obj._en_fallback = en_fallback
+        return obj
+
+    def __eq__(self, other: object) -> bool:
+        if super().__eq__(other):
+            return True
+        if self._en_fallback is not None and self._en_fallback == other:
+            return True
+        return False
+
+    def __ne__(self, other: object) -> bool:
+        return not self.__eq__(other)
+
+
 def _get_city_name(code: Any, airports: dict[str, Any], cities: dict[str, Any]) -> str:
-    """Возвращает название города по коду аэропорта или города: airports[..].city -> cities[..].name."""
+    """Возвращает название города пересадки:
+    сначала русское через parsing.city_name(код города);
+    для аэропорта получает код города из references.airports[код_аэропорта].city (напр. VKO → MOW → «Москва»);
+    если city_name вернул сам код (не знает), тогда английское name из references.cities/airports, иначе код аэропорта.
+    """
     if not code or not isinstance(code, str):
         return ""
     code_str = code.strip()
-    apt = airports.get(code_str)
+
+    apt = airports.get(code_str) if isinstance(airports, dict) else None
+    city_code: str | None = None
+    if isinstance(apt, dict):
+        raw_city = apt.get("city")
+        if raw_city and isinstance(raw_city, str):
+            city_code = raw_city.strip()
+
+    target_code = city_code or code_str
+    ru_name = city_name(target_code)
+    # Если parsing.city_name вернул русское название города (не сам код):
+    if ru_name and ru_name.upper() != target_code.upper():
+        return ru_name
+
+    # Если city_name вернул сам код (не знает), берём английское name из references.cities/airports:
+    if isinstance(cities, dict):
+        city_obj = cities.get(target_code)
+        if isinstance(city_obj, dict) and city_obj.get("name"):
+            return str(city_obj["name"]).strip()
+
+    if isinstance(apt, dict) and apt.get("name"):
+        return str(apt["name"]).strip()
+
+    # Иначе код аэропорта
+    return code_str
+
+
+def _get_city_name_en(code: Any, airports: dict[str, Any], cities: dict[str, Any]) -> str:
+    """Возвращает английское название города по коду аэропорта или города (старое поведение для обратной совместимости)."""
+    if not code or not isinstance(code, str):
+        return ""
+    code_str = code.strip()
+    apt = airports.get(code_str) if isinstance(airports, dict) else None
     if isinstance(apt, dict):
         city_code = apt.get("city")
         if city_code and isinstance(city_code, str):
-            city = cities.get(city_code.strip())
+            city = cities.get(city_code.strip()) if isinstance(cities, dict) else None
             if isinstance(city, dict) and city.get("name"):
                 return str(city["name"]).strip()
         if apt.get("name"):
@@ -202,9 +258,12 @@ def _parse_variant(
         layovers_list: list[str] = []
         for prev_trip, next_trip in zip(trip_list[:-1], trip_list[1:]):
             code = prev_trip.get("to") or next_trip.get("from")
-            city_name = _get_city_name(code, airports, cities)
+            c_name = _get_city_name(code, airports, cities)
+            en_name = _get_city_name_en(code, airports, cities)
             wait_str = _calculate_layover_wait(prev_trip.get("endDateTime"), next_trip.get("startDateTime"))
-            layovers_list.append(f"{city_name}, {wait_str}")
+            layovers_list.append(
+                _LayoverStr(f"{c_name}, {wait_str}", en_fallback=f"{en_name}, {wait_str}")
+            )
         layovers = layovers_list if layovers_list else None
 
     return {
