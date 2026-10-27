@@ -29,3 +29,4 @@ from . import aviasales  # noqa: E402,F401
 from . import kupibilet  # noqa: E402,F401
 from . import travelpayouts  # noqa: E402,F401
 from . import tutu  # noqa: E402,F401
+from . import yandex_travel  # noqa: E402,F401
