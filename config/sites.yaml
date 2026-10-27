@@ -34,6 +34,7 @@ sites:
     parser: kupibilet
     enabled: true
     url_template: "https://www.kupibilet.ru/search?route%5B0%5D=iatax%3A{origin}_{date_iso}_date_{date_iso}_iatax%3A{destination}&adult={adults}&child=0&infant=0&childrenAges=%5B%5D&cabinClass=Y&v=2&filter=%7B%22transportKind%22%3A%7B%22Airplane%22%3Atrue%2C%22Train%22%3Afalse%7D%7D"
+    url_template_rt: "https://www.kupibilet.ru/search?route%5B0%5D=iatax%3A{origin}_{date_iso}_date_{date_iso}_iatax%3A{destination}&route%5B1%5D=iatax%3A{destination}_{date_iso_ret}_date_{date_iso_ret}_iatax%3A{origin}&adult={adults}&child=0&infant=0&childrenAges=%5B%5D&cabinClass=Y&v=2&filter=%7B%22transportKind%22%3A%7B%22Airplane%22%3Atrue%2C%22Train%22%3Afalse%7D%7D"
     settle_ms: 15000
     scrolls: 2
 
