@@ -71,7 +71,7 @@ sites:
   - name: onetwotrip
     source: browser
     parser: onetwotrip
-    enabled: false
+    enabled: true
     url_template: "https://www.onetwotrip.com/ru/f/search/{ddmm}{origin}{destination}?sc=E&p={adults}_0_0"
     url_template_rt: "https://www.onetwotrip.com/ru/f/search/{ddmm}{origin}{destination}{ddmm_ret}?sc=E&p={adults}_0_0"
     settle_ms: 25000
