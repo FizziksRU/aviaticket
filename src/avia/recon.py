@@ -18,6 +18,7 @@ from urllib.parse import urlparse
 from .collector import fetch_snapshot
 from .config import ROOT, load_settings
 from .models import Query
+from .pipeline import resolve_extra
 from .parsing import ParseError, parse_date, parse_return_date, to_iata
 from .sites import build_url
 
@@ -79,7 +80,7 @@ async def main() -> int:
         return 2
 
     try:
-        url = build_url(site, q)
+        url = build_url(site, q, extra=await resolve_extra(site, q))
     except ValueError as e:
         print(e)
         return 2

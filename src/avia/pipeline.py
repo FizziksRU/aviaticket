@@ -70,7 +70,8 @@ async def _from_api(site: SiteConfig, q: Query, settings: Settings) -> tuple[lis
     raise RuntimeError(f"неизвестный api-источник: {site.parser!r}")
 
 
-async def _from_browser(site: SiteConfig, q: Query, settings: Settings) -> tuple[list[Offer], str | None, bool]:
+async def resolve_extra(site: SiteConfig, q: Query) -> dict[str, str] | None:
+    """Доп. подстановки для url_template (id городов у tutu/yandex)."""
     extra: dict[str, str] | None = None
     if site.id_resolver == "tutu":
         origin_id, origin_seo = await resolve_city(q.origin)
@@ -86,6 +87,11 @@ async def _from_browser(site: SiteConfig, q: Query, settings: Settings) -> tuple
             "origin_id": city_id(q.origin),
             "destination_id": city_id(q.destination),
         }
+    return extra
+
+
+async def _from_browser(site: SiteConfig, q: Query, settings: Settings) -> tuple[list[Offer], str | None, bool]:
+    extra = await resolve_extra(site, q)
     url = build_url(site, q, extra=extra)
     snap = await fetch_snapshot(
         url,
