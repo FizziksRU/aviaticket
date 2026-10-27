@@ -104,7 +104,7 @@ def test_format_details_single_leg_and_script_escaping():
     assert "&lt;script&gt;" in card
 
     # Проверка основных полей
-    assert "MOW → ALA" in card
+    assert "Москва → Алматы" in card
     assert "10.12.2026 10:00" in card
     assert "10.12.2026 14:30" in card
     assert "Air &lt;script&gt;Astana&lt;/script&gt;" in card
@@ -146,9 +146,9 @@ def test_format_details_two_legs():
 
     card = format_details(o, q)
 
-    assert "MOW → ALA" in card
+    assert "Москва → Алматы" in card
     assert "<b>Обратно</b>" in card
-    assert "ALA → MOW" in card
+    assert "Алматы → Москва" in card
     assert "20.12.2026 18:00" in card
     assert "20.12.2026 22:30" in card
     assert "Рейс: KC 102" in card

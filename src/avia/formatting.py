@@ -71,7 +71,8 @@ def _build_roundtrip_line(o: Offer, *, baggage_mode: str, include_duration: bool
     outbound_str = _format_leg_brief(o, "туда ", include_duration=include_duration)
     if outbound_str:
         parts.append(outbound_str)
-    assert o.back is not None
+    if o.back is None:
+        raise ValueError("нет обратного плеча")
     return_str = _format_leg_brief(o.back, "обратно ", include_duration=include_duration)
     if return_str:
         parts.append(return_str)
