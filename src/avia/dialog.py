@@ -22,8 +22,8 @@ from .parsing import (
 )
 from .store import ResultStore, SearchSnapshot
 
-# сайты, умеющие «туда и обратно» (все четыре сайта); пустое множество включает заглушку «скоро»
-ROUND_TRIP_SITES: frozenset[str] = frozenset({"aviasales", "kupibilet", "yandex_travel", "tutu"})
+# сайты, умеющие «туда и обратно» (все пять сайтов); пустое множество включает заглушку «скоро»
+ROUND_TRIP_SITES: frozenset[str] = frozenset({"aviasales", "kupibilet", "yandex_travel", "tutu", "onetwotrip"})
 
 HELP = (
     "Пришлите команду:\n"
