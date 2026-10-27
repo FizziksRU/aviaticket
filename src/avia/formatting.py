@@ -5,6 +5,7 @@ from html import escape
 
 from .models import Leg, Offer, Query, SiteResult
 from .offers import baggage_state
+from .parsing import city_name
 
 SYMBOLS = {"RUB": "₽", "KZT": "₸", "UZS": "сум", "USD": "$", "EUR": "€"}
 
@@ -14,7 +15,79 @@ def money(value: int, currency: str) -> str:
     return f"{s} {SYMBOLS.get(currency, currency)}"
 
 
+def _airline_label(o: Offer) -> str | None:
+    if o.back is not None:
+        a1 = escape(o.airline) if o.airline else None
+        a2 = escape(o.back.airline) if o.back.airline else None
+        if a1 and a2:
+            return a1 if a1 == a2 else f"{a1} / {a2}"
+        return a1 or a2
+    return escape(o.airline) if o.airline else None
+
+
+def _format_leg_brief(leg: Offer | Leg, prefix: str, *, include_duration: bool = True) -> str:
+    time_str = ""
+    if leg.depart_time and leg.arrive_time:
+        time_str = f"{escape(leg.depart_time)}→{escape(leg.arrive_time)}"
+    elif leg.depart_time:
+        time_str = f"вылет {escape(leg.depart_time)}"
+    elif leg.arrive_time:
+        time_str = f"прилёт {escape(leg.arrive_time)}"
+
+    dur_str = escape(leg.duration) if (include_duration and leg.duration) else None
+
+    trans_str = None
+    if leg.transfers is not None:
+        if leg.transfers == 0:
+            trans_str = "прямой"
+        elif leg.transfers == 1:
+            trans_str = "1 пересадка"
+        else:
+            trans_str = f"пересадок: {leg.transfers}"
+
+    parts: list[str] = []
+    if time_str:
+        parts.append(time_str)
+    if dur_str:
+        parts.append(dur_str)
+
+    res = ", ".join(parts)
+    if trans_str:
+        if res:
+            res = f"{res} ({trans_str})"
+        else:
+            res = f"({trans_str})"
+
+    return f"{prefix}{res}".strip()
+
+
+def _build_roundtrip_line(o: Offer, *, baggage_mode: str, include_duration: bool) -> str:
+    parts = [f"<b>{money(o.price, o.currency)}</b>"]
+    airline = _airline_label(o)
+    if airline:
+        parts.append(airline)
+    outbound_str = _format_leg_brief(o, "туда ", include_duration=include_duration)
+    if outbound_str:
+        parts.append(outbound_str)
+    assert o.back is not None
+    return_str = _format_leg_brief(o.back, "обратно ", include_duration=include_duration)
+    if return_str:
+        parts.append(return_str)
+    if o.baggage:
+        parts.append(escape(o.baggage))
+    if baggage_mode != "any" and baggage_state(o) is None:
+        if not o.baggage or "багаж не указан" not in o.baggage.lower():
+            parts.append("багаж не указан")
+    return " · ".join(parts)
+
+
 def offer_line(o: Offer, *, baggage_mode: str = "any") -> str:
+    if o.back is not None:
+        line = _build_roundtrip_line(o, baggage_mode=baggage_mode, include_duration=True)
+        if len(line) > 160:
+            line = _build_roundtrip_line(o, baggage_mode=baggage_mode, include_duration=False)
+        return line
+
     parts = [f"<b>{money(o.price, o.currency)}</b>"]
     if o.airline:
         parts.append(escape(o.airline))
@@ -43,15 +116,18 @@ def build_report(
     dropped: int = 0,
 ) -> tuple[list[str], list[Offer]]:
     """Формирует части отчёта (каждая ≤ 4000 символов) и плоский список показанных билетов."""
+    orig_name = city_name(q.origin)
+    dest_name = city_name(q.destination)
+    route_head = f"✈️ <b>{escape(orig_name)} → {escape(dest_name)}</b>"
     if q.return_date:
         date_str = f"туда {q.depart:%d.%m.%Y}, обратно {q.return_date:%d.%m.%Y}"
         head = (
-            f"✈️ <b>{escape(q.origin)} → {escape(q.destination)}</b>, "
+            f"{route_head}, "
             f"{date_str}, пассажиров: {q.adults} (цена общая за оба плеча)"
         )
     else:
         date_str = f"{q.depart:%d.%m.%Y}"
-        head = f"✈️ <b>{escape(q.origin)} → {escape(q.destination)}</b>, {date_str}, пассажиров: {q.adults}"
+        head = f"{route_head}, {date_str}, пассажиров: {q.adults}"
 
     header_lines = [head]
     if baggage_mode != "any":
@@ -220,7 +296,12 @@ def _format_leg_details(
     lines: list[str] = []
     if is_back:
         lines.append("<b>Обратно</b>")
-    lines.append(f"✈️ <b>{escape(orig)} → {escape(dest)}</b>")
+    orig_name = city_name(orig)
+    dest_name = city_name(dest)
+    header_line = f"✈️ <b>{escape(orig_name)} → {escape(dest_name)}</b>"
+    if orig_name != orig or dest_name != dest:
+        header_line += f"<!-- {escape(orig)} → {escape(dest)} -->"
+    lines.append(header_line)
 
     dep_str = _format_datetime(leg.depart_at, leg.depart_time, leg_date, is_departure=True)
     arr_str = _format_datetime(leg.arrive_at, leg.arrive_time, leg_date, is_departure=False)
