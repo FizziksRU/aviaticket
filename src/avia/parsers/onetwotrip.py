@@ -7,6 +7,8 @@ from typing import Any
 
 from ..collector import Snapshot
 from ..models import Leg, Offer, Query
+from .. import parsing
+from ..parsing import city_name
 from . import register_parser
 from .travelpayouts import format_duration
 
@@ -66,19 +68,47 @@ def _format_local_iso(dt_str: Any) -> str | None:
 
 
 def _get_city_name(code: Any, airports: dict[str, Any], cities: dict[str, Any]) -> str:
-    """Возвращает название города по коду аэропорта или города: airports[..].city -> cities[..].name."""
+    """Возвращает название города пересадки: русское через parsing.city_name, либо английское из references."""
     if not code or not isinstance(code, str):
         return ""
-    code_str = code.strip()
-    apt = airports.get(code_str)
+    code_str = code.strip().upper()
+    if not code_str:
+        return ""
+
+    city_code = code_str
+    apt = airports.get(code_str) if isinstance(airports, dict) else None
     if isinstance(apt, dict):
-        city_code = apt.get("city")
-        if city_code and isinstance(city_code, str):
-            city = cities.get(city_code.strip())
-            if isinstance(city, dict) and city.get("name"):
-                return str(city["name"]).strip()
-        if apt.get("name"):
-            return str(apt["name"]).strip()
+        c_code = apt.get("city")
+        if c_code and isinstance(c_code, str) and c_code.strip():
+            city_code = c_code.strip().upper()
+
+    # Сначала русское название города через parsing.city_name
+    ru_name = parsing.city_name(city_code)
+    if ru_name != city_code:
+        return str(ru_name)
+
+    # Если city_name вернул сам код (не знает), тогда английское name из references.cities/airports
+    if isinstance(cities, dict):
+        for key in (city_code, code_str):
+            city_entry = cities.get(key)
+            if isinstance(city_entry, dict):
+                c_name = city_entry.get("name")
+                if c_name and isinstance(c_name, str) and c_name.strip():
+                    return c_name.strip()
+
+    if isinstance(apt, dict):
+        apt_name = apt.get("name")
+        if apt_name and isinstance(apt_name, str) and apt_name.strip():
+            return apt_name.strip()
+    elif isinstance(airports, dict):
+        for a_key in (code_str, city_code):
+            a_entry = airports.get(a_key)
+            if isinstance(a_entry, dict):
+                apt_name = a_entry.get("name")
+                if apt_name and isinstance(apt_name, str) and apt_name.strip():
+                    return apt_name.strip()
+
+    # Иначе код аэропорта (в верхнем регистре)
     return code_str
 
 
@@ -202,9 +232,9 @@ def _parse_variant(
         layovers_list: list[str] = []
         for prev_trip, next_trip in zip(trip_list[:-1], trip_list[1:]):
             code = prev_trip.get("to") or next_trip.get("from")
-            city_name = _get_city_name(code, airports, cities)
+            transfer_city = _get_city_name(code, airports, cities)
             wait_str = _calculate_layover_wait(prev_trip.get("endDateTime"), next_trip.get("startDateTime"))
-            layovers_list.append(f"{city_name}, {wait_str}")
+            layovers_list.append(f"{transfer_city}, {wait_str}")
         layovers = layovers_list if layovers_list else None
 
     return {

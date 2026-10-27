@@ -126,8 +126,8 @@ def test_parse_onetwotrip_roundtrip_layovers():
 
     # Первый оффер с пересадкой во Внуково (Москва): 00:10 -> 22:00 = 21 ч 50 мин
     first = offers[0]
-    assert first.layovers == ["Moscow, 21 ч 50 мин"]
-    assert first.back.layovers == ["Moscow, 13 ч 5 мин"]
+    assert first.layovers == ["Москва, 21 ч 50 мин"]
+    assert first.back.layovers == ["Москва, 13 ч 5 мин"]
 
     for o in offers:
         if o.transfers > 0:
