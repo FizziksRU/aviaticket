@@ -1,4 +1,13 @@
-"""Парсер живой выдачи OneTwoTrip по XHR/JSON-ответам /_avia-search-proxy/search/v3."""
+"""Парсер живой выдачи OneTwoTrip по XHR/JSON-ответам /_avia-search-proxy/search/v3.
+
+При поиске туда-обратно (query.return_date) предложения строятся исключительно
+из готовых цен туда-обратно (объекты price с двумя transportationVariantIds
+для направлений 0 и 1). Сложение цен-«половинок» (price с одним variantId)
+в пары туда × обратно не выполняется, так как сайт показывает такие пары
+непредсказуемо (на живой странице многие синтетические комбинации из разных
+перевозчиков отсутствуют).
+В режиме «в одну сторону» используются цены с одним variantId направления 0.
+"""
 from __future__ import annotations
 
 from datetime import datetime
@@ -335,7 +344,7 @@ def parse_onetwotrip(snapshot: Snapshot, query: Query) -> list[Offer]:
     if is_roundtrip:
         candidates: list[tuple[float, dict[str, Any], dict[str, Any]]] = []
 
-        # (а) Готовые цены туда-обратно с 2 variantIds
+        # Готовые цены туда-обратно с 2 variantIds (половинки не складываются)
         for price_obj in prices.values():
             if not isinstance(price_obj, dict):
                 continue
@@ -358,35 +367,6 @@ def parse_onetwotrip(snapshot: Snapshot, query: Query) -> list[Offer]:
             except (ValueError, TypeError):
                 continue
             candidates.append((cost, v0, v1))
-
-        # (б) Цены-половинки направления 0 и 1
-        halves_dir0: list[tuple[float, dict[str, Any]]] = []
-        halves_dir1: list[tuple[float, dict[str, Any]]] = []
-        for price_obj in prices.values():
-            if not isinstance(price_obj, dict):
-                continue
-            vids = price_obj.get("transportationVariantIds")
-            if not isinstance(vids, list) or len(vids) != 1:
-                continue
-            v = variants.get(vids[0])
-            if not isinstance(v, dict):
-                continue
-            amt = price_obj.get("totalAmount")
-            if amt is None:
-                continue
-            try:
-                cost = float(amt)
-            except (ValueError, TypeError):
-                continue
-            didx = v.get("directionIndex")
-            if didx == 0:
-                halves_dir0.append((cost, v))
-            elif didx == 1:
-                halves_dir1.append((cost, v))
-
-        for c0, v0 in halves_dir0:
-            for c1, v1 in halves_dir1:
-                candidates.append((c0 + c1, v0, v1))
 
         # Сортируем кандидатов по стоимости (возрастание)
         candidates.sort(key=lambda item: item[0])

@@ -49,24 +49,26 @@ def test_results_complete():
 
 
 def test_parse_onetwotrip_roundtrip_prices_and_halves():
-    """Проверка туда-обратно: 30694 (готовая цена) — минимум, пара половинок 30804 присутствует."""
+    """Проверка туда-обратно: только готовые цены (8 офферов), минимум 30694, пары 30804 нет."""
     q = Query("KUF", "EVN", date(2026, 12, 2), return_date=date(2026, 12, 10))
     snap = make_snapshot()
     offers = parse_onetwotrip(snap, q)
 
-    assert len(offers) > 0
+    # В фикстуре 9 цен с 2 variantIds, 2 с одинаковыми цепочками дедуплицируются -> 8 офферов
+    assert len(offers) == 8
     # Офферы отсортированы по возрастанию цены
     prices = [o.price for o in offers]
     assert prices == sorted(prices)
 
-    # Минимальная цена туда-обратно НЕ меньше самой дешёвой готовой цены (30693.62 -> 30694)
-    # и не равна цене одной половинки (15131 — занижение вдвое, 15130.37 -> 15131)
+    # Минимальная цена туда-обратно равна 30694 (30693.62 -> 30694)
     min_price = prices[0]
     assert min_price == 30694
     assert min_price != 15131
+    # Ни один оффер не должен иметь цену ниже минимальной готовой цены с двумя variantIds
+    assert all(p >= 30694 for p in prices)
 
-    # Проверяем наличие пары «половинка туда» + «половинка обратно» (15130.37 + 15673.59 -> 30804)
-    assert 30804 in prices
+    # Цена пары «половинка туда» + «половинка обратно» (15130.37 + 15673.59 -> 30804) отсутствует
+    assert 30804 not in prices
 
     # Готовая цена с копейками округляется вверх (38016.2 -> 38017, ранее int(round(...)) давал 38016)
     assert 38017 in prices
@@ -235,8 +237,8 @@ def test_parse_onetwotrip_price_ceil_rounding_and_float_noise():
     assert 38017 in prices_rt
     assert 38016 not in prices_rt
 
-    # 2. Сумма двух половинок складывается до округления: 15130.37 + 15673.59 = 30803.96 -> 30804
-    assert 30804 in prices_rt
+    # 2. Цена пары половинок (15130.37 + 15673.59 -> 30804) не должна присутствовать
+    assert 30804 not in prices_rt
 
     # 3. Одиночная цена в одну сторону также округляется вверх (15130.37 -> 15131, 8921.72 -> 8922)
     snap_ow = make_snapshot(fixture_name="search_ow_kuf_evn_0212.json")
@@ -257,4 +259,17 @@ def test_parse_onetwotrip_price_ceil_rounding_and_float_noise():
     noise_prices = [o.price for o in offers_noise]
     assert 38016 in noise_prices
     assert 38017 not in noise_prices
+
+
+def test_parse_onetwotrip_roundtrip_only_halves_returns_empty():
+    """Если в данных есть только «половинки» (без цен с 2 variantIds), парсер при return_date возвращает []."""
+    raw = load_fixture_text("search_rt_kuf_evn_0212_1012.json")
+    data = json.loads(raw)
+    data["prices"] = {
+        k: v for k, v in data["prices"].items()
+        if len(v.get("transportationVariantIds", [])) != 2
+    }
+    snap = make_snapshot(payloads=[(SEARCH_URL, json.dumps(data))])
+    q = Query("KUF", "EVN", date(2026, 12, 2), return_date=date(2026, 12, 10))
+    assert parse_onetwotrip(snap, q) == []
 
