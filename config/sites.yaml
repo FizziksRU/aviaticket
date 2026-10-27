@@ -54,10 +54,3 @@ sites:
     url_template: "https://travel.yandex.ru/avia/search/result/?adult_seats={adults}&children_seats=0&fromId={origin_id}&infant_seats=0&klass=economy&oneway=1&salesChannel=B2C&toId={destination_id}&when={date_iso}"
     settle_ms: 30000
     scrolls: 1
-
-  - name: ozon_travel
-    source: browser
-    enabled: false
-    url_template: "https://www.ozon.ru/travel/flight/search?Children=0&Dlts={adults}&Infants=0&ServiceClass=ECONOMY&dates=d{date_iso}&route=MOWALA"
-    settle_ms: 30000
-    scrolls: 1
