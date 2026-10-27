@@ -31,8 +31,25 @@
      * `departureGeoPointId`, `arrivalGeoPointId`: гео-точки из `dictionary.avia.points` / `dictionary.common.cities`.
    - `common.carriers`: справочник перевозчиков `{<carrier_id>: {name, displaySettings, uri}}`.
    - `common.fareApplications`: справочник применений тарифов `{<fare_app_hash>: {segmentConditions, segmentHash, serviceClass, ...}}`.
-   - `avia.conditions`: справочник условий тарифа `{<condition_id>: {baggageKg: {defined, value}, baggagePc: {defined, value}, fareFamily, ...}}`.
+   - `avia.conditions`: справочник условий тарифа `{<condition_id>: {baggageKg: {defined, value}, baggagePc: {defined, value}, cabinBaggageKg, cabinBaggagePc, fareFamily, ...}}`.
      Включение багажа определяется по полям `baggageKg.value > 0` или `baggagePc.value > 0`.
+   - `avia.vehicles`: справочник воздушных судов `{<vehicle_id>: {name}}`.
+   - `avia.points`: справочник аэропортов и гео-точек `{<point_id>: {name, cityId, airportCode}}`.
+   - `common.cities`: справочник городов `{<city_id>: {name: {nominative, ...}}}`.
+
+Режим туда-обратно (roundtrip) и ценообразование:
+-------------------------------------------------
+При поиске туда-обратно (когда задан `query.return_date`) каждое предложение в `offers.actual`
+содержит ровно два идентификатора маршрутов в `routeIds`: `[маршрут туда, маршрут обратно]`.
+Цена в каждом тарифном варианте `offerVariants` (поле `price.value.amount // price.value.fraction`)
+является ОБЩЕЙ (полной) стоимостью за оба плеча (туда и обратно). Это подтверждается
+сопоставлением с полем `offerHash.Price` (содержит ту же итоговую сумму) и `OriginalHash`,
+в котором объединены тарифные хэши обоих маршрутов. Копейки (`fraction: 100`) учитываются
+целочисленным делением `amount // fraction`. Дополнительного суммирования цен между плечами не требуется;
+парсер выбирает минимальную общую стоимость среди `offerVariants`.
+Норма багажа: в режиме туда-обратно тариф считается «с багажом» только если условия ВСЕХ сегментов
+обоих маршрутов (туда и обратно) имеют `baggageKg > 0` или `baggagePc > 0`. Иначе — «без багажа».
+В одностороннем режиме сохраняется исходная логика (достаточно одного сегмента).
 
 Ограничение по объёму выдачи:
 ------------------------------
@@ -56,7 +73,7 @@ import json
 from typing import Any
 
 from ..collector import Snapshot
-from ..models import Offer, Query
+from ..models import Leg, Offer, Query
 from . import register_parser
 from .travelpayouts import format_duration
 
@@ -71,6 +88,22 @@ def _extract_time(dt_str: Any) -> str | None:
             if len(parts) > 1 and len(parts[1]) >= 5:
                 return parts[1][:5]
     return dt_str[:5] if len(dt_str) >= 5 else None
+
+
+def _format_local_iso(dt_str: Any) -> str | None:
+    """Преобразует строку даты/времени в формат ISO местного времени вида 'YYYY-MM-DDTHH:MM'."""
+    if not dt_str or not isinstance(dt_str, str):
+        return None
+    cleaned = dt_str.strip()
+    if not cleaned:
+        return None
+    if " " in cleaned:
+        cleaned = cleaned.replace(" ", "T", 1)
+    if "T" in cleaned:
+        d_part, t_part = cleaned.split("T", 1)
+        if len(t_part) >= 5:
+            return f"{d_part}T{t_part[:5]}"
+    return None
 
 
 def _calculate_duration(dep_iso: Any, arr_iso: Any, fallback_duration: Any = None) -> str | None:
@@ -92,6 +125,20 @@ def _calculate_duration(dep_iso: Any, arr_iso: Any, fallback_duration: Any = Non
         except (ValueError, TypeError):
             pass
     return None
+
+
+def _format_layover_time(diff_sec: float | int) -> str:
+    """Форматирует длительность пересадки вида '2 ч 10 мин', '16 ч' или '45 мин'."""
+    if diff_sec <= 0:
+        return "0 мин"
+    diff_min = int(round(diff_sec / 60))
+    h = diff_min // 60
+    m = diff_min % 60
+    if h > 0 and m > 0:
+        return f"{h} ч {m} мин"
+    if h > 0:
+        return f"{h} ч"
+    return f"{m} мин"
 
 
 def _get_airline_name(seg: dict[str, Any], carriers_dict: dict[str, Any]) -> str | None:
@@ -128,15 +175,110 @@ def _get_airline_name(seg: dict[str, Any], carriers_dict: dict[str, Any]) -> str
     return None
 
 
+def _get_city_name(
+    geo_point_id: Any,
+    points_dict: dict[str, Any],
+    cities_dict: dict[str, Any],
+) -> str:
+    """Возвращает название города пересадки по гео-точке или городу из справочников."""
+    if geo_point_id is None:
+        return ""
+    g_key = str(geo_point_id)
+    # Сначала проверяем dictionary.avia.points
+    pt = points_dict.get(g_key)
+    if isinstance(pt, dict):
+        city_id = pt.get("cityId")
+        if city_id is not None:
+            c_info = cities_dict.get(str(city_id))
+            if isinstance(c_info, dict):
+                name = c_info.get("name")
+                if isinstance(name, dict):
+                    nom = name.get("nominative")
+                    if nom and isinstance(nom, str):
+                        return nom.strip()
+                elif isinstance(name, str) and name.strip():
+                    return name.strip()
+        p_name = pt.get("name")
+        if isinstance(p_name, dict):
+            nom = p_name.get("nominative")
+            if nom and isinstance(nom, str):
+                return nom.strip()
+        elif isinstance(p_name, str) and p_name.strip():
+            return p_name.strip()
+
+    # Проверяем напрямую dictionary.common.cities
+    c_info = cities_dict.get(g_key)
+    if isinstance(c_info, dict):
+        name = c_info.get("name")
+        if isinstance(name, dict):
+            nom = name.get("nominative")
+            if nom and isinstance(nom, str):
+                return nom.strip()
+        elif isinstance(name, str) and name.strip():
+            return name.strip()
+
+    return ""
+
+
+def _segment_has_baggage(
+    seg_id: str,
+    fare_applications: dict[str, Any],
+    fare_apps_dict: dict[str, Any],
+    conditions_dict: dict[str, Any],
+) -> bool:
+    """Проверяет наличие багажа (baggageKg > 0 или baggagePc > 0) для конкретного сегмента."""
+    hashes = fare_applications.get(seg_id)
+    if not hashes:
+        return False
+    hash_list = hashes if isinstance(hashes, list) else [hashes]
+    for fh in hash_list:
+        if not isinstance(fh, str):
+            continue
+        fa = fare_apps_dict.get(fh)
+        if not isinstance(fa, dict):
+            continue
+        cond_id = fa.get("segmentConditions")
+        if not cond_id or not isinstance(cond_id, str):
+            continue
+        cond = conditions_dict.get(cond_id)
+        if not isinstance(cond, dict):
+            continue
+
+        for field_name in ("baggageKg", "baggagePc"):
+            b_val = cond.get(field_name)
+            val = None
+            if isinstance(b_val, dict):
+                val = b_val.get("value")
+            elif isinstance(b_val, (int, float)) and not isinstance(b_val, bool):
+                val = b_val
+            if isinstance(val, (int, float)) and not isinstance(val, bool) and val > 0:
+                return True
+    return False
+
+
 def _has_baggage(
     variant: dict[str, Any],
     fare_apps_dict: dict[str, Any],
     conditions_dict: dict[str, Any],
+    required_segment_ids: list[str] | None = None,
 ) -> bool:
-    """Определяет, включён ли багаж в тариф (baggageKg > 0 или baggagePc > 0 в условиях)."""
+    """Определяет, включён ли багаж в тариф.
+
+    В режиме туда-обратно (когда передан required_segment_ids) багаж считается включённым
+    только если условия ВСЕХ сегментов обоих плеч дают baggageKg/baggagePc > 0.
+    В одностороннем режиме сохраняется прежняя логика: True, если хотя бы один сегмент с багажом.
+    """
     fare_applications = variant.get("fareApplications")
     if not isinstance(fare_applications, dict):
         return False
+
+    if required_segment_ids is not None:
+        if not required_segment_ids:
+            return False
+        return all(
+            _segment_has_baggage(sid, fare_applications, fare_apps_dict, conditions_dict)
+            for sid in required_segment_ids
+        )
 
     for _seg_id, hashes in fare_applications.items():
         hash_list = hashes if isinstance(hashes, list) else [hashes]
@@ -164,6 +306,181 @@ def _has_baggage(
                     return True
 
     return False
+
+
+def _get_carry_on(
+    variant: dict[str, Any],
+    first_seg_id: str | None,
+    fare_apps_dict: dict[str, Any],
+    conditions_dict: dict[str, Any],
+) -> str | None:
+    """Определяет наличие ручной клади: 'ручная кладь есть' / 'ручная кладь нет' при явных данных, иначе None."""
+    fare_applications = variant.get("fareApplications")
+    if not isinstance(fare_applications, dict):
+        return None
+
+    target_hashes: list[str] = []
+    if first_seg_id and first_seg_id in fare_applications:
+        val = fare_applications[first_seg_id]
+        target_hashes = val if isinstance(val, list) else [val]
+    else:
+        for hashes in fare_applications.values():
+            target_hashes = hashes if isinstance(hashes, list) else [hashes]
+            if target_hashes:
+                break
+
+    for fh in target_hashes:
+        if not isinstance(fh, str):
+            continue
+        fa = fare_apps_dict.get(fh)
+        if not isinstance(fa, dict):
+            continue
+        cond_id = fa.get("segmentConditions")
+        if not cond_id or not isinstance(cond_id, str):
+            continue
+        cond = conditions_dict.get(cond_id)
+        if not isinstance(cond, dict):
+            continue
+
+        pc_info = cond.get("cabinBaggagePc")
+        kg_info = cond.get("cabinBaggageKg")
+
+        has_explicit = False
+        has_carry = False
+
+        if isinstance(pc_info, dict) and pc_info.get("defined") is True:
+            has_explicit = True
+            v = pc_info.get("value")
+            if isinstance(v, (int, float)) and not isinstance(v, bool) and v > 0:
+                has_carry = True
+
+        if isinstance(kg_info, dict) and kg_info.get("defined") is True:
+            has_explicit = True
+            v = kg_info.get("value")
+            if isinstance(v, (int, float)) and not isinstance(v, bool) and v > 0:
+                has_carry = True
+
+        if has_explicit:
+            return "ручная кладь есть" if has_carry else "ручная кладь нет"
+
+    return None
+
+
+def _parse_route_leg(
+    route_id: str,
+    routes_dict: dict[str, Any],
+    segments_dict: dict[str, Any],
+    carriers_dict: dict[str, Any],
+    vehicles_dict: dict[str, Any],
+    points_dict: dict[str, Any],
+    cities_dict: dict[str, Any],
+) -> dict[str, Any] | None:
+    """Разбирает маршрут (routeId) и возвращает словарь с характеристиками плеча перелёта."""
+    if not route_id or not isinstance(route_id, str):
+        return None
+    route = routes_dict.get(route_id)
+    if not isinstance(route, dict):
+        return None
+    segment_ids = route.get("segmentIds")
+    if not isinstance(segment_ids, list) or not segment_ids:
+        return None
+
+    segs: list[dict[str, Any]] = []
+    for sid in segment_ids:
+        s = segments_dict.get(sid)
+        if not isinstance(s, dict):
+            return None
+        segs.append(s)
+
+    first_seg = segs[0]
+    last_seg = segs[-1]
+
+    # Число пересадок
+    transfer_ids = route.get("transferIds")
+    if isinstance(transfer_ids, list):
+        transfers = len(transfer_ids)
+    else:
+        transfers = max(0, len(segment_ids) - 1)
+
+    # Авиакомпания перевозчика первого сегмента
+    airline = _get_airline_name(first_seg, carriers_dict)
+
+    # Время вылета и прилёта (HH:MM)
+    depart_time = _extract_time(first_seg.get("departureDateTime"))
+    arrive_time = _extract_time(last_seg.get("arrivalDateTime"))
+
+    # Длительность перелёта
+    duration = _calculate_duration(
+        first_seg.get("departureDateTime"),
+        last_seg.get("arrivalDateTime"),
+        fallback_duration=first_seg.get("duration"),
+    )
+
+    # Даты вылета и прилёта в ISO местного времени ("2026-12-16T10:15")
+    depart_at = _format_local_iso(first_seg.get("departureDateTime"))
+    arrive_at = _format_local_iso(last_seg.get("arrivalDateTime"))
+
+    # Номера рейсов ("DV-1010" -> "DV 1010")
+    fn_list: list[str] = []
+    for s in segs:
+        voyage = s.get("voyageNumber")
+        if isinstance(voyage, str) and voyage.strip():
+            fn_list.append(voyage.replace("-", " ").strip())
+    flight_numbers = fn_list if fn_list else None
+
+    # Самолёты из справочника vehicles
+    ac_list: list[str] = []
+    for s in segs:
+        vid = s.get("vehicleId")
+        if vid is not None and vid != 0:
+            veh = vehicles_dict.get(str(vid)) or vehicles_dict.get(vid)
+            if isinstance(veh, dict):
+                v_name = veh.get("name")
+                if v_name and isinstance(v_name, str):
+                    clean_vn = v_name.strip()
+                    if clean_vn and clean_vn not in ac_list:
+                        ac_list.append(clean_vn)
+    aircraft = ", ".join(ac_list) if ac_list else None
+
+    # Описание пересадок (город/аэропорт, время ожидания)
+    layovers: list[str] | None = None
+    if len(segs) > 1:
+        lay_list: list[str] = []
+        for i in range(len(segs) - 1):
+            p_s = segs[i]
+            n_s = segs[i + 1]
+            c_name = _get_city_name(p_s.get("arrivalGeoPointId"), points_dict, cities_dict)
+            try:
+                dt_arr = datetime.fromisoformat(p_s["arrivalDateTime"])
+                dt_dep = datetime.fromisoformat(n_s["departureDateTime"])
+                diff_sec = (dt_dep - dt_arr).total_seconds()
+            except (ValueError, TypeError, KeyError):
+                diff_sec = -1
+            if diff_sec > 0:
+                t_str = _format_layover_time(diff_sec)
+                lay_str = f"{c_name}, {t_str}" if c_name else t_str
+            elif c_name:
+                lay_str = c_name
+            else:
+                lay_str = ""
+            if lay_str:
+                lay_list.append(lay_str)
+        layovers = lay_list if lay_list else None
+
+    return {
+        "airline": airline,
+        "depart_time": depart_time,
+        "arrive_time": arrive_time,
+        "duration": duration,
+        "transfers": transfers,
+        "flight_numbers": flight_numbers,
+        "aircraft": aircraft,
+        "layovers": layovers,
+        "depart_at": depart_at,
+        "arrive_at": arrive_at,
+        "segment_ids": segment_ids,
+        "first_seg_id": segment_ids[0],
+    }
 
 
 def results_complete(snapshot: Snapshot | None) -> bool:
@@ -287,12 +604,88 @@ def parse_tutu(snapshot: Snapshot, query: Query) -> list[Offer]:
     if not isinstance(conditions_dict, dict):
         conditions_dict = {}
 
-    offers: list[Offer] = []
+    vehicles_dict = avia_dict.get("vehicles")
+    if not isinstance(vehicles_dict, dict):
+        vehicles_dict = {}
+
+    points_dict = avia_dict.get("points")
+    if not isinstance(points_dict, dict):
+        points_dict = {}
+
+    cities_dict = common_dict.get("cities")
+    if not isinstance(cities_dict, dict):
+        cities_dict = {}
+
+    is_roundtrip = query is not None and query.return_date is not None
+    offers_by_key: dict[tuple[Any, ...], Offer] = {}
 
     for _offer_id, offer in actual_offers.items():
         if not isinstance(offer, dict):
             continue
         try:
+            route_ids = offer.get("routeIds")
+            if not isinstance(route_ids, list) or not route_ids:
+                continue
+
+            if is_roundtrip:
+                # В режиме туда-обратно пропускаем предложения без ровно двух непустых маршрутов
+                if len(route_ids) != 2 or not route_ids[0] or not route_ids[1]:
+                    continue
+                out_info = _parse_route_leg(
+                    route_ids[0],
+                    routes_dict,
+                    segments_dict,
+                    carriers_dict,
+                    vehicles_dict,
+                    points_dict,
+                    cities_dict,
+                )
+                back_info = _parse_route_leg(
+                    route_ids[1],
+                    routes_dict,
+                    segments_dict,
+                    carriers_dict,
+                    vehicles_dict,
+                    points_dict,
+                    cities_dict,
+                )
+                if out_info is None or back_info is None:
+                    continue
+
+                back_leg: Leg | None = Leg(
+                    airline=back_info["airline"],
+                    depart_time=back_info["depart_time"],
+                    arrive_time=back_info["arrive_time"],
+                    duration=back_info["duration"],
+                    transfers=back_info["transfers"],
+                    flight_numbers=back_info["flight_numbers"],
+                    aircraft=back_info["aircraft"],
+                    layovers=back_info["layovers"],
+                    depart_at=back_info["depart_at"],
+                    arrive_at=back_info["arrive_at"],
+                )
+                all_segment_ids: list[str] | None = (
+                    out_info["segment_ids"] + back_info["segment_ids"]
+                )
+                dedup_key = (route_ids[0], route_ids[1])
+            else:
+                if not route_ids[0]:
+                    continue
+                out_info = _parse_route_leg(
+                    route_ids[0],
+                    routes_dict,
+                    segments_dict,
+                    carriers_dict,
+                    vehicles_dict,
+                    points_dict,
+                    cities_dict,
+                )
+                if out_info is None:
+                    continue
+                back_leg = None
+                all_segment_ids = None
+                dedup_key = tuple(route_ids)
+
             variants = offer.get("offerVariants")
             if not isinstance(variants, list) or not variants:
                 continue
@@ -344,51 +737,24 @@ def parse_tutu(snapshot: Snapshot, query: Query) -> list[Offer]:
 
             price = int(best_var_price)
 
-            # Извлечение маршрута и сегментов
-            route_ids = offer.get("routeIds")
-            if not isinstance(route_ids, list) or not route_ids:
-                continue
-
-            first_route_id = route_ids[0]
-            route = routes_dict.get(first_route_id)
-            if not isinstance(route, dict):
-                continue
-
-            segment_ids = route.get("segmentIds")
-            if not isinstance(segment_ids, list) or not segment_ids:
-                continue
-
-            first_seg = segments_dict.get(segment_ids[0])
-            last_seg = segments_dict.get(segment_ids[-1])
-            if not isinstance(first_seg, dict) or not isinstance(last_seg, dict):
-                continue
-
-            # Пересадки: число пересадок в первом/единственном маршруте
-            transfer_ids = route.get("transferIds")
-            if isinstance(transfer_ids, list):
-                transfers = len(transfer_ids)
-            else:
-                transfers = max(0, len(segment_ids) - 1)
-
-            # Авиакомпания перевозчика
-            airline = _get_airline_name(first_seg, carriers_dict)
-
-            # Время вылета и прилёта (местное время как дано в HH:MM)
-            depart_time = _extract_time(first_seg.get("departureDateTime"))
-            arrive_time = _extract_time(last_seg.get("arrivalDateTime"))
-
-            # Длительность перелёта
-            duration = _calculate_duration(
-                first_seg.get("departureDateTime"),
-                last_seg.get("arrivalDateTime"),
-                fallback_duration=first_seg.get("duration"),
-            )
-
             # Багаж
             baggage = (
                 "с багажом"
-                if _has_baggage(best_variant, fare_apps_dict, conditions_dict)
+                if _has_baggage(
+                    best_variant,
+                    fare_apps_dict,
+                    conditions_dict,
+                    required_segment_ids=all_segment_ids,
+                )
                 else "без багажа"
+            )
+
+            # Ручная кладь
+            carry_on = _get_carry_on(
+                best_variant,
+                out_info["first_seg_id"],
+                fare_apps_dict,
+                conditions_dict,
             )
 
             # Ссылка на предложение
@@ -399,27 +765,41 @@ def parse_tutu(snapshot: Snapshot, query: Query) -> list[Offer]:
                 else None
             )
 
-            offers.append(
-                Offer(
-                    site="tutu",
-                    price=price,
-                    currency=currency,
-                    airline=airline,
-                    depart_time=depart_time,
-                    arrive_time=arrive_time,
-                    duration=duration,
-                    transfers=transfers,
-                    baggage=baggage,
-                    url=url,
-                )
+            offer_obj = Offer(
+                site="tutu",
+                price=price,
+                currency=currency,
+                airline=out_info["airline"],
+                depart_time=out_info["depart_time"],
+                arrive_time=out_info["arrive_time"],
+                duration=out_info["duration"],
+                transfers=out_info["transfers"],
+                baggage=baggage,
+                url=url,
+                flight_numbers=out_info["flight_numbers"],
+                aircraft=out_info["aircraft"],
+                layovers=out_info["layovers"],
+                depart_at=out_info["depart_at"],
+                arrive_at=out_info["arrive_at"],
+                carry_on=carry_on,
+                back=back_leg,
             )
+
+            # Дедупликация: сохраняем самый дешёвый вариант для данного ключа маршрута
+            if dedup_key in offers_by_key:
+                if price < offers_by_key[dedup_key].price:
+                    offers_by_key[dedup_key] = offer_obj
+            else:
+                offers_by_key[dedup_key] = offer_obj
         except Exception:
             # Битые предложения пропускать, не падать
             continue
 
+    offers = list(offers_by_key.values())
     offers.sort(key=lambda o: o.price)
     return offers
 
 
 # Привязываем results_complete к функции парсера для pipeline.py
 parse_tutu.results_complete = results_complete  # type: ignore[attr-defined]
+
