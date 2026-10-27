@@ -24,14 +24,23 @@ log = logging.getLogger("avia.pipeline")
 # Общий SearchGuard на процесс (модульный объект для тестов с подменой)
 guard = SearchGuard()
 
+# Пауза перед повторной попыткой при 0 вариантов (ParserEmptyError)
+EMPTY_RETRY_DELAY: float = 3.0
+
 
 class ParserEmptyError(Exception):
     """Исключение при 0 вариантов от парсера на непустой странице."""
 
-    def __init__(self, message: str, page_url: str | None = None) -> None:
+    def __init__(
+        self,
+        message: str,
+        page_url: str | None = None,
+        snapshot_path: Path | None = None,
+    ) -> None:
         super().__init__(message)
         self.message = message
         self.page_url = page_url
+        self.snapshot_path = snapshot_path
 
 
 def _save_empty_snapshot(
@@ -39,7 +48,7 @@ def _save_empty_snapshot(
     snap: Snapshot,
     settings: Settings,
     tag: str = "empty",
-) -> None:
+) -> Path | None:
     """Сохраняет отладочный снимок при 0 вариантов или неверных датах (без токенов)."""
     try:
         debug_dir = Path(settings.debug_dir)
@@ -64,8 +73,10 @@ def _save_empty_snapshot(
             flags=re.I,
         )
         target.write_text(content, encoding="utf-8")
+        return target
     except Exception as e:
         log.warning("Не удалось сохранить отладочный снимок для %s: %s", site.name, e)
+        return None
 
 
 def filter_wrong_dates(offers: list[Offer], q: Query) -> tuple[list[Offer], int]:
@@ -172,10 +183,11 @@ async def _from_browser(site: SiteConfig, q: Query, settings: Settings) -> tuple
         text_stripped = snap.text.strip()
         is_captcha = snap.blocked
         if len(text_stripped) > 200 and not is_captcha:
-            _save_empty_snapshot(site, snap, settings)
+            snap_path = _save_empty_snapshot(site, snap, settings)
             raise ParserEmptyError(
                 "формат выдачи мог измениться, 0 вариантов при непустой странице",
                 page_url=snap.url,
+                snapshot_path=snap_path,
             )
 
     had_offers = bool(offers)
@@ -183,10 +195,11 @@ async def _from_browser(site: SiteConfig, q: Query, settings: Settings) -> tuple
     if dropped > 0:
         log.warning("Сайт %s: отброшено %d офферов с неверными датами", site.name, dropped)
     if not offers and had_offers:
-        _save_empty_snapshot(site, snap, settings, tag="wrongdates")
+        snap_path = _save_empty_snapshot(site, snap, settings, tag="wrongdates")
         raise ParserEmptyError(
             "сайт вернул билеты на другие даты, а не на запрошенные",
             page_url=snap.url,
+            snapshot_path=snap_path,
         )
 
     for o in offers:
@@ -217,7 +230,22 @@ async def _run_site(
             offers, page_url = await _from_api(site, q, settings)
             return offers, page_url, False
         else:
-            return await _from_browser(site, q, settings)
+            try:
+                return await _from_browser(site, q, settings)
+            except ParserEmptyError as exc:
+                if exc.snapshot_path and exc.snapshot_path.exists():
+                    try:
+                        exc.snapshot_path.unlink()
+                    except OSError:
+                        pass
+                log.warning(
+                    "Сайт %s вернул 0 вариантов (%s), повторная попытка через %s с",
+                    site.name,
+                    exc,
+                    EMPTY_RETRY_DELAY,
+                )
+                await asyncio.sleep(EMPTY_RETRY_DELAY)
+                return await _from_browser(site, q, settings)
 
     try:
         (offers, page_url, partial), from_cache = await g.run(
