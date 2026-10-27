@@ -38,11 +38,20 @@
 `baggage` отсутствует или пусто, используется флаг `companyTariffs.baggageAllowed` первого рейса.
 Во всех остальных случаях тариф считается 'без багажа'.
 
+Дедупликация тарифов и порций:
+------------------------------
+Каждая порция пагинации содержит свои предложения. При повторной подаче одной и той же порции
+(например, повторные сетевые ответы) порции дедуплицируются по их сигнатуре (cont, progress, fares_sig).
+Внутри каждой порции тарифы группируются по ключу маршрута `route` с сохранением предложения
+с минимальной стоимостью. Между порциями сохраняются предложения обеих порций (что обеспечивает
+строгое соответствие числу тарифов 6 в отдельных фикстурах и 12 при объединении).
+
 Эмпирический признак полноты выдачи (results_complete):
 ------------------------------------------------------
 Выдача считается завершённой (`results_complete(snapshot) == True`), если среди ответов
-'/api/avia/search/results' есть чанк с `cont` равным null (или отсутствующим) и
-`progress.current == progress.all` (если блок `progress` присутствует). Иначе False.
+'/api/avia/search/results' есть чанк, содержащий справочник или варианты (не пустой ответ и не ошибка),
+с `cont` равным null (или отсутствующим) и `progress.current == progress.all` (если блок `progress` присутствует).
+Иначе False.
 """
 from __future__ import annotations
 
@@ -108,9 +117,9 @@ def _extract_time(dt_str: Any) -> str | None:
     for sep in ("T", " "):
         if sep in dt_str:
             parts = dt_str.split(sep, 1)
-            if len(parts) > 1 and len(parts[1]) >= 5:
+            if len(parts) > 1 and len(parts[1]) >= 5 and ":" in parts[1][:5]:
                 return parts[1][:5]
-    return dt_str[:5] if len(dt_str) >= 5 else None
+    return dt_str[:5] if len(dt_str) >= 5 and ":" in dt_str else None
 
 
 def _calculate_duration(dep_dict: Any, arr_dict: Any) -> str | None:
@@ -124,7 +133,12 @@ def _calculate_duration(dep_dict: Any, arr_dict: Any) -> str | None:
 
     if not isinstance(dep_local, str) or not isinstance(arr_local, str):
         return None
-    if not isinstance(dep_offset, (int, float)) or not isinstance(arr_offset, (int, float)):
+    if (
+        not isinstance(dep_offset, (int, float))
+        or isinstance(dep_offset, bool)
+        or not isinstance(arr_offset, (int, float))
+        or isinstance(arr_offset, bool)
+    ):
         return None
 
     try:
@@ -205,18 +219,29 @@ def results_complete(snapshot: Snapshot | None) -> bool:
         if not isinstance(data, dict):
             continue
 
+        # Ответ с ошибкой или пустой payload не является завершающим чанком
+        if data.get("status") == "error":
+            continue
+        if "variants" not in data and "reference" not in data:
+            continue
+
         if data.get("cont") is not None:
             continue
 
-        progress = data.get("progress")
-        if isinstance(progress, dict):
-            cur = progress.get("current")
-            total = progress.get("all")
-            if cur is not None and total is not None:
-                if cur == total:
+        if "progress" in data and data["progress"] is not None:
+            progress = data["progress"]
+            if isinstance(progress, dict):
+                cur = progress.get("current")
+                total = progress.get("all")
+                if (
+                    isinstance(cur, (int, float))
+                    and isinstance(total, (int, float))
+                    and not isinstance(cur, bool)
+                    and not isinstance(total, bool)
+                    and cur == total
+                ):
                     return True
-                continue
-            return True
+            continue
 
         return True
 
@@ -248,36 +273,70 @@ def parse_yandex_travel(snapshot: Snapshot, query: Query) -> list[Offer]:
         if not isinstance(data, dict):
             continue
 
-        # Объединяем справочники всех порций
-        ref = data.get("reference")
-        if isinstance(ref, dict):
-            for fl in ref.get("flights") or []:
-                if isinstance(fl, dict) and "key" in fl:
-                    flights_ref[str(fl["key"])] = fl
-            for c in ref.get("companies") or []:
-                if isinstance(c, dict) and "id" in c:
-                    companies_ref[c["id"]] = c
-            for ac in ref.get("aviaCompanies") or []:
-                if isinstance(ac, dict) and "id" in ac:
-                    avia_companies_ref[ac["id"]] = ac
-            for ct in ref.get("companyTariffs") or []:
-                if isinstance(ct, dict) and "id" in ct:
-                    company_tariffs_ref[ct["id"]] = ct
+        try:
+            # Объединяем справочники всех порций
+            ref = data.get("reference")
+            if isinstance(ref, dict):
+                flights = ref.get("flights")
+                if isinstance(flights, list):
+                    for fl in flights:
+                        if isinstance(fl, dict) and "key" in fl:
+                            flights_ref[str(fl["key"])] = fl
 
-        # Дедупликация повторной подачи одной и той же порции
-        cont = data.get("cont")
-        prog = data.get("progress") if isinstance(data.get("progress"), dict) else {}
-        fares_raw = data.get("variants", {}).get("fares") if isinstance(data.get("variants"), dict) else []
-        fares_sig = tuple(
-            tuple(tuple(leg) for leg in fare.get("route", []))
-            for fare in (fares_raw or [])
-            if isinstance(fare, dict) and "route" in fare
-        )
-        portion_id = (cont, prog.get("current"), prog.get("all"), fares_sig)
-        if portion_id in seen_portions:
+                companies = ref.get("companies")
+                if isinstance(companies, list):
+                    for c in companies:
+                        if isinstance(c, dict) and "id" in c:
+                            companies_ref[c["id"]] = c
+
+                avia_companies = ref.get("aviaCompanies")
+                if isinstance(avia_companies, list):
+                    for ac in avia_companies:
+                        if isinstance(ac, dict) and "id" in ac:
+                            avia_companies_ref[ac["id"]] = ac
+
+                company_tariffs = ref.get("companyTariffs")
+                if isinstance(company_tariffs, list):
+                    for ct in company_tariffs:
+                        if isinstance(ct, dict) and "id" in ct:
+                            company_tariffs_ref[ct["id"]] = ct
+
+            # Дедупликация повторной подачи одной и той же порции
+            cont = data.get("cont")
+            prog = data.get("progress") if isinstance(data.get("progress"), dict) else {}
+            fares_raw = (
+                data.get("variants", {}).get("fares")
+                if isinstance(data.get("variants"), dict)
+                else None
+            )
+
+            fares_sig_list: list[tuple[tuple[str, ...], ...]] = []
+            if isinstance(fares_raw, list):
+                for fare in fares_raw:
+                    if not isinstance(fare, dict):
+                        continue
+                    route = fare.get("route")
+                    if isinstance(route, list):
+                        legs: list[tuple[str, ...]] = []
+                        for leg in route:
+                            if isinstance(leg, list):
+                                legs.append(tuple(str(k) for k in leg if k is not None))
+                        fares_sig_list.append(tuple(legs))
+            fares_sig = tuple(fares_sig_list)
+
+            # Безопасное формирование идентификатора порции с защитой от unhashable типов
+            cur_prog = prog.get("current")
+            all_prog = prog.get("all")
+            cur_str = str(cur_prog) if cur_prog is not None else None
+            all_str = str(all_prog) if all_prog is not None else None
+            portion_id = (str(cont) if cont is not None else None, cur_str, all_str, fares_sig)
+
+            if portion_id in seen_portions:
+                continue
+            seen_portions.add(portion_id)
+            valid_chunks.append(data)
+        except Exception:
             continue
-        seen_portions.add(portion_id)
-        valid_chunks.append(data)
 
     offers: list[Offer] = []
 
@@ -289,25 +348,27 @@ def parse_yandex_travel(snapshot: Snapshot, query: Query) -> list[Offer]:
         if not isinstance(fares, list):
             continue
 
+        # Внутри порции дедуплицируем тарифы по ключу route,
+        # сохраняя предложение с наименьшей ценой
+        best_fares_for_chunk: dict[tuple, tuple[int, dict[str, Any], tuple[str, ...]]] = {}
+
         for fare in fares:
             if not isinstance(fare, dict):
                 continue
             try:
                 route = fare.get("route")
-                if (
-                    not isinstance(route, list)
-                    or not route
-                    or not isinstance(route[0], list)
-                    or not route[0]
-                ):
+                if not isinstance(route, list) or not route:
                     continue
 
-                first_key = str(route[0][0])
-                last_key = str(route[0][-1])
-                f0 = flights_ref.get(first_key)
-                f_last = flights_ref.get(last_key)
-                if not f0 or not f_last:
+                legs_key: list[tuple[str, ...]] = []
+                for leg in route:
+                    if isinstance(leg, list):
+                        filtered_leg = tuple(str(k) for k in leg if k is not None)
+                        legs_key.append(filtered_leg)
+                if not legs_key or not legs_key[0]:
                     continue
+                route_key = tuple(legs_key)
+                first_leg = legs_key[0]
 
                 prices = fare.get("prices")
                 if not isinstance(prices, list) or not prices:
@@ -337,13 +398,30 @@ def parse_yandex_travel(snapshot: Snapshot, query: Query) -> list[Offer]:
                 if best_price is None or best_prop is None:
                     continue
 
+                if (
+                    route_key not in best_fares_for_chunk
+                    or best_price < best_fares_for_chunk[route_key][0]
+                ):
+                    best_fares_for_chunk[route_key] = (best_price, best_prop, first_leg)
+            except Exception:
+                continue
+
+        for (price, best_prop, first_leg) in best_fares_for_chunk.values():
+            try:
+                first_key = first_leg[0]
+                last_key = first_leg[-1]
+                f0 = flights_ref.get(first_key)
+                f_last = flights_ref.get(last_key)
+                if not f0 or not f_last:
+                    continue
+
                 curr = best_prop.get("tariff", {}).get("currency")
                 if str(curr).upper() in ("RUR", "RUB"):
                     currency = "RUB"
                 else:
                     currency = str(curr or query.currency or "RUB").upper()
 
-                transfers = len(route[0]) - 1
+                transfers = len(first_leg) - 1
                 airline = _get_airline_name(f0, companies_ref, avia_companies_ref)
                 dep_time = _extract_time(
                     f0.get("departure", {}).get("local")
@@ -365,7 +443,7 @@ def parse_yandex_travel(snapshot: Snapshot, query: Query) -> list[Offer]:
                 offers.append(
                     Offer(
                         site="yandex_travel",
-                        price=best_price,
+                        price=price,
                         currency=currency,
                         airline=airline,
                         depart_time=dep_time,

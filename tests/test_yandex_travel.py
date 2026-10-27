@@ -6,7 +6,12 @@ from pathlib import Path
 from avia.collector import Snapshot
 from avia.models import Query
 from avia.parsers import PARSERS
-from avia.parsers.yandex_travel import parse_yandex_travel, results_complete
+from avia.parsers.yandex_travel import (
+    _calculate_duration,
+    _extract_time,
+    parse_yandex_travel,
+    results_complete,
+)
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures" / "yandex_travel"
 API_URL = "https://travel.yandex.ru/api/avia/search/results?qid=test_qid&cont=0"
@@ -174,6 +179,38 @@ def test_deduplication_repeated_portion():
     assert len(offers_last) == 6
 
 
+def test_route_deduplication_within_portion():
+    """Проверка дедупликации внутри одной порции по ключу route с сохранением минимальной цены."""
+    q = Query("MOW", "ALA", date(2026, 12, 12))
+    data = json.loads(load_fixture_text("results_cont0_mow_ala.json"))
+
+    # Добавляем дублирующий тариф с тем же маршрутом, что у Fare 0 (N4 77 + RT 715),
+    # но с большей ценой (25000 вместо 17672). Итоговое число тарифов и цена не должны измениться.
+    dup_expensive = {
+        "route": data["variants"]["fares"][0]["route"],
+        "prices": [{"tariff": {"value": 25000, "currency": "RUR"}}],
+    }
+    data["variants"]["fares"].append(dup_expensive)
+
+    snap = make_snapshot([(API_URL, json.dumps(data))])
+    offers = parse_yandex_travel(snap, q)
+    assert len(offers) == 6
+    assert offers[0].price == 17672
+
+    # Теперь добавляем тот же маршрут, но с меньшей ценой (15000 вместо 17672).
+    # Должно обновиться ценовое предложение для данного маршрута.
+    dup_cheaper = {
+        "route": data["variants"]["fares"][0]["route"],
+        "prices": [{"tariff": {"value": 15000, "currency": "RUR"}}],
+    }
+    data["variants"]["fares"].append(dup_cheaper)
+
+    snap2 = make_snapshot([(API_URL, json.dumps(data))])
+    offers2 = parse_yandex_travel(snap2, q)
+    assert len(offers2) == 6
+    assert offers2[0].price == 15000
+
+
 def test_results_complete():
     """Проверка эмпирического признака полноты выдачи (results_complete)."""
     text0 = load_fixture_text("results_cont0_mow_ala.json")
@@ -186,6 +223,16 @@ def test_results_complete():
     # Неподходящий URL -> False
     snap_other = make_snapshot([("https://travel.yandex.ru/api/other/endpoint", text_last)])
     assert results_complete(snap_other) is False
+
+    # Пустой словарь JSON или ответ с ошибкой не должны считаться завершённой выдачей
+    snap_empty = make_snapshot([(API_URL, "{}")])
+    assert results_complete(snap_empty) is False
+
+    snap_err = make_snapshot([(API_URL, json.dumps({"status": "error", "error": "rate_limit"}))])
+    assert results_complete(snap_err) is False
+
+    snap_err_wrapped = make_snapshot([(API_URL, json.dumps({"data": {"status": "error"}}))])
+    assert results_complete(snap_err_wrapped) is False
 
     # Первая порция (cont=1, progress 4/20) -> False
     snap_first = make_snapshot([(API_URL, text0)])
@@ -211,15 +258,21 @@ def test_results_complete():
     snap_inc = make_snapshot([(API_URL, json.dumps(data_incomplete))])
     assert results_complete(snap_inc) is False
 
-    # cont=null без блока progress -> True
+    # cont=null без блока progress (но с реальной выдачей) -> True
     data_no_prog = json.loads(text_last)
     del data_no_prog["progress"]
     snap_no_prog = make_snapshot([(API_URL, json.dumps(data_no_prog))])
     assert results_complete(snap_no_prog) is True
 
+    # cont=null с boolean в progress -> False
+    data_bool_prog = json.loads(text_last)
+    data_bool_prog["progress"] = {"current": True, "all": 1}
+    snap_bool_prog = make_snapshot([(API_URL, json.dumps(data_bool_prog))])
+    assert results_complete(snap_bool_prog) is False
+
 
 def test_malformed_and_empty_payloads():
-    """Парсер не падает на пустых, битых данных и битых тарифах."""
+    """Парсер не падает на пустых, битых данных, невалидных типах и битых тарифах."""
     q = Query("MOW", "ALA", date(2026, 12, 12))
 
     # Пустой снимок
@@ -233,15 +286,50 @@ def test_malformed_and_empty_payloads():
     snap_list = make_snapshot([(API_URL, json.dumps([1, 2, 3]))])
     assert parse_yandex_travel(snap_list, q) == []
 
-    # Частично поврежденный тариф (например, без цен или без рейса) не роняет остальные
+    # Пустой JSON-объект
+    snap_empty = make_snapshot([(API_URL, "{}")])
+    assert parse_yandex_travel(snap_empty, q) == []
+
+    # Частично поврежденный тариф и невалидные типы полей не роняют парсер
     data = json.loads(load_fixture_text("results_cont0_mow_ala.json"))
-    # Добавим битый тариф
+
+    # Добавляем различные битые тарифы (включая route: None, route: [None], route: [[None]])
     data["variants"]["fares"].append({"broken": True})
+    data["variants"]["fares"].append({"route": None, "prices": None})
+    data["variants"]["fares"].append({"route": [None], "prices": []})
+    data["variants"]["fares"].append({"route": [[None]], "prices": []})
+    data["variants"]["fares"].append({"route": 123, "prices": "not_a_list"})
     data["variants"]["fares"].append({"route": [], "prices": []})
+    data["variants"]["fares"].append(None)
+    data["variants"]["fares"].append("broken_string_fare")
     data["variants"]["fares"].append({
         "route": [["unknown_flight_key"], []],
         "prices": [{"tariff": {"value": 10000, "currency": "RUR"}}],
     })
+    data["variants"]["fares"].append({
+        "route": [["2612122210DV10082612130430"]],
+        "prices": [{"tariff": {"value": None}}],
+    })
+    data["variants"]["fares"].append({
+        "route": [["2612122210DV10082612130430"]],
+        "prices": [{"tariff": {"value": True}}],
+    })
+    data["variants"]["fares"].append({
+        "route": [["2612122210DV10082612130430"]],
+        "prices": [{"tariff": {"value": "invalid_number"}}],
+    })
+
+    # Повреждаем типы справочников reference
+    data["reference"]["flights"].append(None)
+    data["reference"]["flights"].append(123)
+    data["reference"]["companies"] = 123  # не список
+    data["reference"]["aviaCompanies"] = True  # не список
+    data["reference"]["companyTariffs"] = "not_a_list"
+
+    # Нехэшируемые cont и progress
+    data["cont"] = [1, 2, 3]
+    data["progress"] = {"current": {}, "all": []}
+
     snap_corrupt = make_snapshot([(API_URL, json.dumps(data))])
     offers = parse_yandex_travel(snap_corrupt, q)
     assert len(offers) == 6
@@ -287,3 +375,35 @@ def test_baggage_detection():
     snap_ct_luggage = make_snapshot([(API_URL, json.dumps(data2))])
     offers_ct = parse_yandex_travel(snap_ct_luggage, q)
     assert offers_ct[0].baggage == "с багажом"
+
+
+def test_helper_functions_edge_cases():
+    """Проверка вспомогательных функций _extract_time и _calculate_duration на граничных случаях."""
+    # _extract_time
+    assert _extract_time("2026-12-12T22:50:00") == "22:50"
+    assert _extract_time("2026-12-12 18:25:00") == "18:25"
+    assert _extract_time("22:50") == "22:50"
+    assert _extract_time("2026-12-12") is None  # дата без времени не должна возвращать "2026-"
+    assert _extract_time("invalid") is None
+    assert _extract_time(None) is None
+    assert _extract_time(12345) is None
+
+    # _calculate_duration
+    dep = {"local": "2026-12-12T22:50:00", "offset": 180}
+    arr = {"local": "2026-12-13T18:25:00", "offset": 300}
+    assert _calculate_duration(dep, arr) == "17ч 35м"
+
+    # Boolean в offset не должен интерпретироваться как 1 или 0 минут
+    dep_bool = {"local": "2026-12-12T22:50:00", "offset": True}
+    assert _calculate_duration(dep_bool, arr) is None
+
+    arr_bool = {"local": "2026-12-13T18:25:00", "offset": False}
+    assert _calculate_duration(dep, arr_bool) is None
+
+    # Невалидные типы словарей
+    assert _calculate_duration("bad", arr) is None
+    assert _calculate_duration(dep, "bad") is None
+
+    # Прилёт раньше вылета
+    arr_early = {"local": "2026-12-11T18:25:00", "offset": 300}
+    assert _calculate_duration(dep, arr_early) is None
