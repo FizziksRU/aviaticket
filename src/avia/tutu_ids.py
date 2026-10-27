@@ -14,6 +14,8 @@ TIMEOUT_SECONDS = 10.0
 STATIC_CITIES: dict[str, tuple[str, str]] = {
     "MOW": ("491", "Moskva"),
     "ALA": ("117", "Almati"),
+    "KUF": ("74", "Samara"),
+    "EVN": ("236", "Erevan"),
 }
 
 # Кэш в памяти на процесс: {IATA: (city_id, seo_id)}
