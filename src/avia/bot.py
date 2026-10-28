@@ -26,6 +26,7 @@ from .history import PriceHistory
 from .offers import assign_ids, filter_by_baggage
 from .pipeline import search
 from .store import ResultStore
+from .subscriptions import SubscriptionStore
 
 log = logging.getLogger("avia.bot")
 API = "https://api.telegram.org/bot{token}/{method}"
@@ -49,9 +50,11 @@ class Bot:
         if dialog is not None:
             self.dialog = dialog
             self.store = store if store is not None else dialog.store
+            self.subs = dialog.subs
         else:
+            self.subs = SubscriptionStore(settings.storage_dir / "subscriptions.sqlite")
             self.store = store if store is not None else ResultStore()
-            self.dialog = Dialog(store=self.store)
+            self.dialog = Dialog(store=self.store, subs=self.subs)
 
     async def call(self, method: str, **params):
         payload = {k: v for k, v in params.items() if v is not None}

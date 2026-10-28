@@ -6,6 +6,7 @@ from datetime import date
 from enum import Enum
 from html import escape
 import secrets
+import time
 
 from .criteria import (
     ALLOWED_DAY_PARTS,
@@ -18,6 +19,7 @@ from .formatting import (
     build_more_report,
     build_report,
     format_details,
+    money,
 )
 from .models import Offer, Query
 from .parsing import (
@@ -32,6 +34,9 @@ from .parsing import (
     to_iata,
 )
 from .store import ResultStore, SearchSnapshot
+from .subscriptions import SubscriptionStore
+
+MAX_SUBSCRIPTIONS = 10
 
 # сайты, умеющие «туда и обратно» (все пять сайтов); пустое множество включает заглушку «скоро»
 ROUND_TRIP_SITES: frozenset[str] = frozenset({"aviasales", "kupibilet", "yandex_travel", "tutu", "onetwotrip"})
@@ -54,6 +59,7 @@ class Step(str, Enum):
     BAGGAGE = "BAGGAGE"
     SEARCHING = "SEARCHING"
     DONE = "DONE"
+    THRESHOLD = "THRESHOLD"
 
 
 @dataclass
@@ -82,6 +88,7 @@ class Session:
     baggage_mode: str = "any"
     dialog_id: str = field(default_factory=lambda: secrets.token_hex(2))
     criteria: SearchCriteria = field(default_factory=SearchCriteria)
+    threshold_sub_id: int | None = None
 
 
 def to_reply_markup(keyboard: list[list[tuple[str, str]]] | None) -> dict | None:
@@ -103,8 +110,19 @@ def compact_keyboard(dialog_id: str, *, has_more: bool) -> list[list[tuple[str, 
         ("⚙ Изменить фильтры", f"filters:{dialog_id}"),
         ("📋 Полный список", f"full:{dialog_id}"),
     ])
+    rows.append([("🔔 Отслеживать цену", f"track:{dialog_id}")])
     rows.append([("🔎 Новый поиск", f"new:{dialog_id}")])
     return rows
+
+
+def _format_filters(baggage_mode: str, criteria: SearchCriteria) -> list[str]:
+    items: list[str] = []
+    if baggage_mode == "with":
+        items.append("с багажом")
+    elif baggage_mode == "without":
+        items.append("без багажа")
+    items.extend(criteria.describe())
+    return items
 
 
 def full_keyboard(dialog_id: str) -> list[list[tuple[str, str]]]:
@@ -122,10 +140,12 @@ class Dialog:
         sessions: dict[int | str, Session] | None = None,
         store: ResultStore | None = None,
         today: Callable[[], date] | None = None,
+        subs: SubscriptionStore | None = None,
     ):
         self.sessions: dict[int | str, Session] = sessions if sessions is not None else {}
         self.store: ResultStore = store if store is not None else ResultStore()
         self.today: Callable[[], date] = today if today is not None else date.today
+        self.subs: SubscriptionStore | None = subs
 
     def start_menu(self, chat_id: int | str) -> Reply:
         self.sessions[chat_id] = Session(step=Step.MENU, dialog_id=secrets.token_hex(2))
@@ -360,17 +380,226 @@ class Dialog:
             answer="Диалог устарел, начните заново",
         )
 
+    def _my_subscriptions(self, chat_id: int | str) -> list[Reply]:
+        if self.subs is None:
+            return [
+                Reply(
+                    text="Отслеживание недоступно",
+                    keyboard=[[("🔎 Найти билет", "menu:go")]],
+                )
+            ]
+        subs = self.subs.list_active(int(chat_id))
+        if not subs:
+            return [
+                Reply(
+                    text="Пока ничего не отслеживается. Выполните поиск и нажмите «🔔 Отслеживать цену»",
+                    keyboard=[[("🔎 Найти билет", "menu:go")]],
+                )
+            ]
+
+        lines: list[str] = []
+        keyboard: list[list[tuple[str, str]]] = []
+        for idx, sub in enumerate(subs, 1):
+            dep_str = sub.depart.strftime("%d.%m")
+            if sub.return_date:
+                dates_str = f"{dep_str}–{sub.return_date.strftime('%d.%m')}"
+            else:
+                dates_str = dep_str
+
+            orig_name = escape(city_name(sub.origin))
+            dest_name = escape(city_name(sub.destination))
+            parts = [f"{idx}. {orig_name} → {dest_name}, {dates_str}, {sub.adults} пасс."]
+
+            filters = _format_filters(sub.baggage_mode, sub.criteria)
+            for f in filters:
+                parts.append(escape(f))
+
+            if sub.threshold is not None:
+                parts.append(f"порог {money(sub.threshold, 'RUB')}")
+
+            if sub.min_price is not None:
+                parts.append(f"от {money(sub.min_price, 'RUB')}")
+
+            lines.append(" · ".join(parts))
+            keyboard.append([
+                (f"❌ №{idx}", f"unsub:{sub.id}"),
+                (f"🎯 №{idx}", f"thr:{sub.id}"),
+            ])
+
+        keyboard.append([("🔎 Найти билет", "menu:go")])
+        return [Reply(text="\n".join(lines), keyboard=keyboard)]
+
+    def _on_unsub_callback(self, chat_id: int | str, sub_id_str: str) -> list[Reply]:
+        if self.subs is None:
+            return [
+                Reply(
+                    text="Отслеживание недоступно",
+                    answer="Отслеживание недоступно",
+                    keyboard=[
+                        [("🔔 Мои отслеживания", "menu:track")],
+                        [("🔎 Новый поиск", "menu:go")],
+                    ],
+                )
+            ]
+        try:
+            sub_id = int(sub_id_str)
+        except (ValueError, TypeError):
+            sub_id = None
+
+        if sub_id is not None and self.subs.deactivate(sub_id, int(chat_id)):
+            msg = "🔕 Отслеживание отключено"
+        else:
+            msg = "Подписка не найдена"
+
+        return [
+            Reply(
+                text=msg,
+                answer=msg,
+                keyboard=[
+                    [("🔔 Мои отслеживания", "menu:track")],
+                    [("🔎 Новый поиск", "menu:go")],
+                ],
+            )
+        ]
+
+    def _on_thr_callback(self, chat_id: int | str, sub_id_str: str) -> list[Reply]:
+        if self.subs is None:
+            return [Reply(answer="Отслеживание недоступно")]
+        try:
+            sub_id = int(sub_id_str)
+        except (ValueError, TypeError):
+            sub_id = None
+
+        sub = self.subs.get(sub_id) if sub_id is not None else None
+        if sub is None or not sub.active or sub.chat_id != int(chat_id):
+            return [
+                Reply(
+                    text="Подписка не найдена",
+                    answer="Подписка не найдена",
+                    keyboard=[
+                        [("🔔 Мои отслеживания", "menu:track")],
+                        [("🔎 Новый поиск", "menu:go")],
+                    ],
+                )
+            ]
+
+        session = Session(
+            step=Step.THRESHOLD,
+            dialog_id=secrets.token_hex(2),
+            threshold_sub_id=sub.id,
+        )
+        self.sessions[chat_id] = session
+        return [
+            Reply(
+                text="Введите цену в рублях, ниже которой прислать уведомление (0 — убрать порог)",
+                keyboard=[[("✖ Отмена", f"cancel:{session.dialog_id}")]],
+            )
+        ]
+
+    def _on_track_callback(self, chat_id: int | str) -> list[Reply]:
+        snap = self.store.get(chat_id)
+        if snap is None:
+            return [
+                Reply(
+                    text="Результаты поиска устарели, начните новый поиск",
+                    keyboard=[[("🔎 Найти билет", "menu:go")]],
+                )
+            ]
+        if self.subs is None:
+            return [Reply(answer="Отслеживание недоступно")]
+
+        active_subs = self.subs.list_active(int(chat_id))
+        existing = next(
+            (
+                s
+                for s in active_subs
+                if (
+                    s.origin == snap.query.origin
+                    and s.destination == snap.query.destination
+                    and s.depart == snap.query.depart
+                    and s.return_date == snap.query.return_date
+                    and s.adults == snap.query.adults
+                    and s.baggage_mode == snap.baggage_mode
+                    and s.criteria == snap.criteria
+                )
+            ),
+            None,
+        )
+        if existing is None and len(active_subs) >= MAX_SUBSCRIPTIONS:
+            return [
+                Reply(
+                    text="Достигнут лимит 10 отслеживаний, отпишитесь от ненужного",
+                    keyboard=[[("🔔 Мои отслеживания", "menu:track")]],
+                )
+            ]
+
+        now = time.time()
+        if existing is not None:
+            sub = existing
+            already_exists = True
+        else:
+            sub = self.subs.create(
+                int(chat_id),
+                snap.query,
+                snap.baggage_mode,
+                snap.criteria,
+                now=now,
+            )
+            already_exists = False
+
+        matching_offers = [
+            o
+            for r in snap.results
+            for o in r.offers
+            if o.price is not None and o.currency == snap.query.currency
+        ]
+        best_offer = min(matching_offers, key=lambda o: o.price) if matching_offers else None
+
+        if best_offer is not None and (not already_exists or self.subs.first_price(sub.id) is None):
+            self.subs.record_price(
+                sub.id,
+                best_offer.price,
+                best_offer.currency,
+                best_offer.offer_id or None,
+                now,
+            )
+
+        orig_city = city_name(snap.query.origin)
+        dest_city = city_name(snap.query.destination)
+        dep_str = snap.query.depart.strftime("%d.%m")
+        if snap.query.return_date:
+            dates_str = f"{dep_str}–{snap.query.return_date.strftime('%d.%m')}"
+        else:
+            dates_str = dep_str
+
+        route_str = f"{escape(orig_city)} → {escape(dest_city)}, {dates_str}"
+        filters = _format_filters(snap.baggage_mode, snap.criteria)
+        if filters:
+            filters_part = f", фильтры: {escape(', '.join(filters))}"
+        else:
+            filters_part = ""
+
+        if best_offer is not None:
+            price_part = f"Сейчас от {money(best_offer.price, best_offer.currency)}. Пришлю сообщение, когда цена упадёт."
+        else:
+            price_part = "Пока билетов нет, пришлю, когда появятся."
+
+        text = f"🔔 Слежу за маршрутом: {route_str}{filters_part}. {price_part}"
+        if already_exists:
+            text += "\n\nВы уже следите за этим маршрутом."
+
+        keyboard = [
+            [("🎯 Порог цены", f"thr:{sub.id}")],
+            [("🔔 Мои отслеживания", "menu:track")],
+            [("🔎 Новый поиск", "menu:go")],
+        ]
+        return [Reply(text=text, keyboard=keyboard, answer="Подписка оформлена")]
+
     def on_callback(self, chat_id: int | str, data: str) -> list[Reply | SearchRequest]:
         if data == "menu:go":
             return [self._start_search(chat_id)]
         if data == "menu:track":
-            return [
-                Reply(
-                    text="🔔 Раздел «Мои отслеживания» скоро появится.",
-                    answer="Скоро",
-                    keyboard=[[("🔎 Найти билет", "menu:go")]],
-                )
-            ]
+            return self._my_subscriptions(chat_id)
         if data == "menu:help":
             return [
                 Reply(
@@ -384,9 +613,19 @@ class Dialog:
 
         parts = data.split(":")
         action = parts[0]
-        cb_dialog_id = parts[1] if len(parts) > 1 else ""
+        sub_id_or_dialog_id = parts[1] if len(parts) > 1 else ""
         value = parts[2] if len(parts) > 2 else ""
 
+        if action == "unsub":
+            return self._on_unsub_callback(chat_id, sub_id_or_dialog_id)
+
+        if action == "thr":
+            return self._on_thr_callback(chat_id, sub_id_or_dialog_id)
+
+        if action == "track":
+            return self._on_track_callback(chat_id)
+
+        cb_dialog_id = sub_id_or_dialog_id
         session = self.sessions.get(chat_id)
         if session is None or session.dialog_id != cb_dialog_id:
             return [self._expired_reply()]
@@ -500,9 +739,6 @@ class Dialog:
                     criteria=session.criteria,
                 )
             ]
-
-        if action == "track":
-            return [Reply(answer="Отслеживание появится позже")]
 
         if action == "new":
             return [self._start_search(chat_id)]
@@ -778,6 +1014,68 @@ class Dialog:
 
         if session is not None and session.step == Step.SEARCHING:
             return [Reply(text="Поиск ещё идёт, подождите завершения.")]
+
+        if session is not None and session.step == Step.THRESHOLD:
+            cleaned = text.replace(" ", "").replace("\xa0", "").replace("₽", "").strip()
+            try:
+                val = int(cleaned)
+            except ValueError:
+                return [
+                    Reply(
+                        text="Введите число в рублях, например 9000",
+                        keyboard=[[("✖ Отмена", f"cancel:{session.dialog_id}")]],
+                    )
+                ]
+
+            if val < 0:
+                return [
+                    Reply(
+                        text="Введите число в рублях, например 9000",
+                        keyboard=[[("✖ Отмена", f"cancel:{session.dialog_id}")]],
+                    )
+                ]
+
+            sub_id = session.threshold_sub_id
+            self.sessions[chat_id] = Session(step=Step.DONE)
+
+            if self.subs is None or sub_id is None:
+                return [
+                    Reply(
+                        text="Отслеживание недоступно",
+                        keyboard=[[("🔔 Мои отслеживания", "menu:track")]],
+                    )
+                ]
+
+            if val == 0:
+                ok = self.subs.set_threshold(sub_id, int(chat_id), None)
+                if not ok:
+                    return [
+                        Reply(
+                            text="Подписка не найдена",
+                            keyboard=[[("🔔 Мои отслеживания", "menu:track")]],
+                        )
+                    ]
+                return [
+                    Reply(
+                        text="🎯 Порог убран",
+                        keyboard=[[("🔔 Мои отслеживания", "menu:track")]],
+                    )
+                ]
+            else:
+                ok = self.subs.set_threshold(sub_id, int(chat_id), val)
+                if not ok:
+                    return [
+                        Reply(
+                            text="Подписка не найдена",
+                            keyboard=[[("🔔 Мои отслеживания", "menu:track")]],
+                        )
+                    ]
+                return [
+                    Reply(
+                        text=f"🎯 Порог {money(val, 'RUB')} сохранён",
+                        keyboard=[[("🔔 Мои отслеживания", "menu:track")]],
+                    )
+                ]
 
         # Outside dialog: step MENU, DONE or no session
         snap = self.store.get(chat_id)

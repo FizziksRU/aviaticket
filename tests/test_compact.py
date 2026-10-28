@@ -274,8 +274,10 @@ async def test_bot_flow_search_gives_compact_response_with_buttons(monkeypatch):
     # Ряд 2: filters, full
     assert any("Изменить фильтры" in b["text"] and b["callback_data"].startswith("filters:") for b in kb[1])
     assert any("Полный список" in b["text"] and b["callback_data"].startswith("full:") for b in kb[1])
-    # Ряд 3: new
-    assert any("Новый поиск" in b["text"] and b["callback_data"].startswith("new:") for b in kb[2])
+    # Ряд 3: track
+    assert any("Отслеживать цену" in b["text"] and b["callback_data"].startswith("track:") for b in kb[2])
+    # Ряд 4: new
+    assert any("Новый поиск" in b["text"] and b["callback_data"].startswith("new:") for b in kb[3])
 
     snap = bot.store.get(10)
     assert snap is not None
