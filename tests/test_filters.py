@@ -157,6 +157,21 @@ def test_ticket_without_data_passes():
     )
     assert matches(empty_offer, strict_crit) is True
 
+    # Дата без времени в depart_at / arrive_at не должна отбрасываться или считаться ночью
+    o_date_only = Offer(site="s", price=10000, depart_at="2026-12-10")
+    assert matches(o_date_only, SearchCriteria(depart_parts={"morning"})) is True
+    assert matches(o_date_only, SearchCriteria(depart_parts={"day"})) is True
+    assert matches(o_date_only, SearchCriteria(depart_parts={"evening"})) is True
+    assert matches(o_date_only, SearchCriteria(depart_parts={"night"})) is True
+
+    o_date_only_arr = Offer(site="s", price=10000, arrive_at="2026-12-10")
+    assert matches(o_date_only_arr, SearchCriteria(arrive_parts={"morning"})) is True
+    assert matches(o_date_only_arr, strict_crit) is True
+
+    # Нестроковые типы аргументов не приводят к исключениям
+    o_non_str = Offer(site="s", price=10000, depart_time=123, depart_at=456)  # type: ignore[arg-type]
+    assert matches(o_non_str, SearchCriteria(depart_parts={"morning"})) is True
+
 
 def test_roundtrip_checks_both_legs():
     # Для туда-обратно max_transfers и max_duration применяются к обоим плечам,
@@ -245,6 +260,22 @@ def test_balance_score():
     # Без данных по длительности и пересадкам слагаемые = 0
     o_empty = Offer(site="s", price=10000)
     assert balance_score(o_empty, 1000) == 10000.0
+
+    # Туда-обратно: пересадки и длительность суммируются с обоих плеч
+    # Цена: 20000 + (2ч + 3ч) * 1000 + (1 + 1) * 500 = 20000 + 5000 + 1000 = 26000.0
+    o_rt = Offer(
+        site="s",
+        price=20000,
+        duration="2ч",
+        transfers=1,
+        back=Leg(duration="3ч", transfers=1),
+    )
+    assert balance_score(o_rt, 1000) == 26000.0
+
+
+def test_pick_cards_empty():
+    assert pick_cards([], SearchCriteria()) == []
+    assert pick_cards([], SearchCriteria(hour_cost=500)) == []
 
 
 def test_pick_cards_cheapest_and_fastest_same():

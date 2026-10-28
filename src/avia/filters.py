@@ -38,7 +38,7 @@ def parse_duration_minutes(text: str | None) -> int | None:
 
 
 def _extract_time(time_str: str | None, iso_str: str | None) -> tuple[int, int] | None:
-    if time_str:
+    if isinstance(time_str, str):
         s = time_str.strip()
         parts = s.split(":")
         if len(parts) >= 2:
@@ -48,13 +48,15 @@ def _extract_time(time_str: str | None, iso_str: str | None) -> tuple[int, int] 
                     return h, m
             except (ValueError, TypeError):
                 pass
-    if iso_str:
+    if isinstance(iso_str, str):
         s = iso_str.strip()
+        if "T" not in s and " " not in s and ":" not in s:
+            return None
         try:
             dt = datetime.fromisoformat(s.replace("Z", "+00:00"))
             return dt.hour, dt.minute
         except (ValueError, TypeError):
-            m = re.search(r"[T\s](\d{1,2}):(\d{2})", s)
+            m = re.search(r"(?:^|[T\s])(\d{1,2}):(\d{2})", s)
             if m:
                 try:
                     h, minute = int(m.group(1)), int(m.group(2))
