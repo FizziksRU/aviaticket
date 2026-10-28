@@ -76,3 +76,13 @@ sites:
     url_template_rt: "https://www.onetwotrip.com/ru/f/search/{ddmm}{origin}{destination}{ddmm_ret}?sc=E&p={adults}_0_0"
     settle_ms: 25000
     scrolls: 2
+
+  # Озон Тревел: шаблоны сняты со ссылки пользователя (route = туда+обратно кодами в нижнем регистре).
+  # Выключен: антибот Озона отдаёт заглушку автоматическому браузеру (сначала recon в видимом окне).
+  - name: ozon_travel
+    source: browser
+    enabled: false
+    url_template: "https://www.ozon.ru/travel/flight/search?Children=0&Dlts={adults}&Infants=0&ServiceClass=ECONOMY&dates=d{date_iso}&route={origin}{destination}"
+    url_template_rt: "https://www.ozon.ru/travel/flight/search?Children=0&Dlts={adults}&Infants=0&ServiceClass=ECONOMY&dates=d{date_iso}d{date_iso_ret}&route={origin}{destination}{destination}{origin}"
+    settle_ms: 30000
+    scrolls: 1

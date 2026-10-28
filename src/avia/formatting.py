@@ -10,6 +10,20 @@ from .parsing import city_name
 SYMBOLS = {"RUB": "₽", "KZT": "₸", "UZS": "сум", "USD": "$", "EUR": "€"}
 
 
+def ozon_url(q: Query) -> str:
+    """Ссылка на выдачу Озон Тревел для ручной проверки (бот цены Озона не получает)."""
+    o, d = q.origin.lower(), q.destination.lower()
+    dates = f"d{q.depart.isoformat()}"
+    route = f"{o}{d}"
+    if q.return_date:
+        dates += f"d{q.return_date.isoformat()}"
+        route += f"{d}{o}"
+    return (
+        "https://www.ozon.ru/travel/flight/search"
+        f"?Children=0&Dlts={q.adults}&Infants=0&ServiceClass=ECONOMY&dates={dates}&route={route}"
+    )
+
+
 def money(value: int, currency: str) -> str:
     s = f"{value:,}".replace(",", " ")
     return f"{s} {SYMBOLS.get(currency, currency)}"
@@ -232,7 +246,10 @@ def build_report(
             current_lines.extend(cont_header)
         current_lines.extend(url_lines)
 
-    footer_lines = ["<i>Цены сняты со страницы сейчас, при покупке могут измениться.</i>"]
+    footer_lines = [
+        f'Озон Тревел: <a href="{escape(ozon_url(q), quote=True)}">открыть выдачу</a> '
+        "(цены Озона бот не проверяет)",
+        "<i>Цены сняты со страницы сейчас, при покупке могут измениться.</i>"]
     if flat:
         footer_lines.append("Напишите номер билета, чтобы увидеть подробности.")
 
