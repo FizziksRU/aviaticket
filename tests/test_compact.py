@@ -439,3 +439,226 @@ async def test_bot_flow_filters_returns_baggage_with_saved_criteria(monkeypatch)
     kb = last_call["reply_markup"]["inline_keyboard"]
     adv_button = [b for row in kb for b in row if "Расширенные настройки" in b["text"]][0]
     assert "(2)" in adv_button["text"]
+
+
+def test_compact_report_without_prefilled_offer_ids():
+    """Билеты без prefilled offer_id получают offer_id, others вне парето не теряются."""
+    q = Query("MOW", "ALA", date(2026, 12, 10))
+    # o1 дешёвый и быстрый (Парето)
+    o1 = Offer(site="s", price=10000, duration="3 ч", airline="SU")
+    # o2 дороже и медленнее o1 (НЕ в Парето)
+    o2 = Offer(site="s", price=20000, duration="5 ч", airline="S7")
+    # o3 ещё дороже и медленнее (НЕ в Парето)
+    o3 = Offer(site="s", price=30000, duration="8 ч", airline="UT")
+    results = [SiteResult("s", True, [o1, o2, o3])]
+
+    chunks, flat, pool = build_compact_report(q, results, SearchCriteria())
+
+    # Все билеты должны получить offer_id
+    assert all(bool(o.offer_id) for o in pool)
+    assert all(bool(o.offer_id) for o in flat)
+
+    # В pool должны быть все 3 билета: Парето (o1) + остальные (o2, o3)
+    assert len(pool) == 3
+    assert pool[0] is o1
+    assert pool[1] is o2
+    assert pool[2] is o3
+
+    # flat содержит карточки (o1)
+    assert flat == [o1]
+
+    # build_more_report отдаёт o2 и o3, а не o1 повторно
+    more_text, more_offers = build_more_report(q, pool, flat, n=5, start_number=2)
+    assert more_text is not None
+    assert more_offers == [o2, o3]
+    assert "2. <b>20 000 ₽</b>" in more_text
+    assert "3. <b>30 000 ₽</b>" in more_text
+
+
+def test_build_more_report_int_raises_typeerror_and_set_works():
+    """build_more_report отвергает int с понятной ошибкой и принимает set[str]."""
+    q = Query("MOW", "ALA", date(2026, 12, 10))
+    pool = [Offer(site="s", price=10000 + i * 100, offer_id=f"id_{i}") for i in range(5)]
+
+    with pytest.raises(TypeError, match="int в shown_count не поддерживается"):
+        build_more_report(q, pool, shown=1, start_number=2)
+
+    with pytest.raises(TypeError, match="int в shown_count не поддерживается"):
+        build_more_report(q, pool, shown_count=1, start_number=2)
+
+    # set[str] идентификаторов работает
+    text, offers = build_more_report(q, pool, shown={"id_0", "id_1"}, n=2, start_number=3)
+    assert text is not None
+    assert len(offers) == 2
+    assert offers[0].offer_id == "id_2"
+    assert offers[1].offer_id == "id_3"
+
+
+def test_compact_report_error_spacing_no_triple_newline():
+    """При наличии сайтов с ошибкой нет лишнего перевода строки (\n\n\n)."""
+    q = Query("MOW", "ALA", date(2026, 12, 10))
+    o = Offer(site="ok_site", price=10000, duration="3 ч", offer_id="ok1")
+    results = [
+        SiteResult("ok_site", True, [o]),
+        SiteResult("err_site", False, [], error="соединение разорвано"),
+    ]
+    chunks, flat, pool = build_compact_report(q, results, SearchCriteria())
+    for chunk in chunks:
+        assert "\n\n\n" not in chunk
+
+
+@pytest.mark.asyncio
+async def test_bot_flow_full_to_summary_via_list_compact(monkeypatch):
+    """Возврат из полного списка к сводке («⬅ К сводке») через callback list:...:compact."""
+    bot = make_fake_bot(allowed_ids={123})
+
+    offers_a = [Offer(site="site_a", price=10000 + i * 100, airline=f"Alpha_{i}", offer_id=f"a_{i}") for i in range(5)]
+    offers_b = [Offer(site="site_b", price=5000 + i * 100, airline=f"Beta_{i}", offer_id=f"b_{i}") for i in range(5)]
+
+    async def mock_search(q, s):
+        return [SiteResult("site_a", True, offers_a), SiteResult("site_b", True, offers_b)]
+
+    monkeypatch.setattr("avia.bot.search", mock_search)
+
+    # 1. Поиск -> компактный отчёт
+    await bot.handle({"chat": {"id": 50}, "from": {"id": 123}, "text": "/price MOW ALA 10.12"})
+    snap = bot.store.get(50)
+    assert snap.view == "compact"
+    d_id = bot.dialog.sessions[50].dialog_id
+
+    # 2. Переход в полный список
+    bot.calls.clear()
+    await bot.handle_callback({
+        "id": "cq_full",
+        "message": {"chat": {"id": 50}, "message_id": 501},
+        "from": {"id": 123},
+        "data": f"full:{d_id}",
+    })
+    assert snap.view == "full"
+    assert len(snap.flat) == 10
+
+    # Проверяем, что в клавиатуре полного списка callback_data имеет суффикс :compact
+    last_call = [p for m, p in bot.calls if m == "sendMessage"][-1]
+    kb = last_call["reply_markup"]["inline_keyboard"]
+    summary_btn = [b for row in kb for b in row if "К сводке" in b["text"]][0]
+    assert summary_btn["callback_data"] == f"list:{d_id}:compact"
+
+    # 3. Нажатие «⬅ К сводке» -> возвращает компактный отчёт, а не зацикливает полный список
+    bot.calls.clear()
+    await bot.handle_callback({
+        "id": "cq_back_to_summary",
+        "message": {"chat": {"id": 50}, "message_id": 502},
+        "from": {"id": 123},
+        "data": summary_btn["callback_data"],
+    })
+
+    assert snap.view == "compact"
+    # flat сброшен обратно до карточек (не 10 билетов из полного списка)
+    assert len(snap.flat) < 10
+    send_calls = [p for m, p in bot.calls if m == "sendMessage"]
+    assert len(send_calls) >= 1
+    compact_text = send_calls[0]["text"]
+    assert "Самый дешёвый" in compact_text
+
+    # Проверяем кнопки компактного вида
+    ret_kb = send_calls[-1]["reply_markup"]["inline_keyboard"]
+    assert any("Полный список" in b["text"] for row in ret_kb for b in row)
+    assert any("Показать ещё 5" in b["text"] for row in ret_kb for b in row)
+
+    # 4. Проверяем, что номер билета "1" теперь открывает именно карточку из компактного flat
+    bot.calls.clear()
+    await bot.handle({"chat": {"id": 50}, "from": {"id": 123}, "text": "1"})
+    details_text = [p["text"] for m, p in bot.calls if m == "sendMessage"][0]
+    assert snap.flat[0].airline in details_text
+
+
+@pytest.mark.asyncio
+async def test_bot_flow_details_back_to_compact_and_full(monkeypatch):
+    """Кнопка «⬅ К списку» из карточки деталей возвращает в правильный вид (compact или full)."""
+    bot = make_fake_bot(allowed_ids={123})
+
+    offers = [
+        Offer(site="s", price=5000 + i * 500, airline=f"Air_{i}", offer_id=f"id_{i}")
+        for i in range(10)
+    ]
+    async def mock_search(q, s):
+        return [SiteResult("s", True, offers)]
+
+    monkeypatch.setattr("avia.bot.search", mock_search)
+
+    # 1. Поиск -> компактный отчёт
+    await bot.handle({"chat": {"id": 60}, "from": {"id": 123}, "text": "/price MOW ALA 10.12"})
+    snap = bot.store.get(60)
+    d_id = bot.dialog.sessions[60].dialog_id
+
+    # 2. Открываем детали из компактного отчёта
+    bot.calls.clear()
+    await bot.handle({"chat": {"id": 60}, "from": {"id": 123}, "text": "1"})
+    details_msg = [p for m, p in bot.calls if m == "sendMessage"][0]
+    kb_details = details_msg["reply_markup"]["inline_keyboard"]
+    back_btn = [b for row in kb_details for b in row if "К списку" in b["text"]][0]
+    assert back_btn["callback_data"] == f"list:{d_id}"
+
+    # 3. Нажимаем «⬅ К списку» -> возврат в компактный отчёт
+    bot.calls.clear()
+    await bot.handle_callback({
+        "id": "cq_back_compact",
+        "message": {"chat": {"id": 60}, "message_id": 601},
+        "from": {"id": 123},
+        "data": back_btn["callback_data"],
+    })
+    assert snap.view == "compact"
+    last_call = [p for m, p in bot.calls if m == "sendMessage"][-1]
+    ret_kb = last_call["reply_markup"]["inline_keyboard"]
+    assert any("Полный список" in b["text"] for row in ret_kb for b in row)
+
+    # 4. Переходим в полный список
+    bot.calls.clear()
+    await bot.handle_callback({
+        "id": "cq_full",
+        "message": {"chat": {"id": 60}, "message_id": 602},
+        "from": {"id": 123},
+        "data": f"full:{d_id}",
+    })
+    assert snap.view == "full"
+
+    # 5. Открываем детали билета номер 5 из полного списка
+    bot.calls.clear()
+    await bot.handle({"chat": {"id": 60}, "from": {"id": 123}, "text": "5"})
+    details_msg5 = [p for m, p in bot.calls if m == "sendMessage"][0]
+    kb_details5 = details_msg5["reply_markup"]["inline_keyboard"]
+    back_btn5 = [b for row in kb_details5 for b in row if "К списку" in b["text"]][0]
+
+    # 6. Нажимаем «⬅ К списку» -> возврат в полный список, а не в компактный
+    bot.calls.clear()
+    await bot.handle_callback({
+        "id": "cq_back_full",
+        "message": {"chat": {"id": 60}, "message_id": 603},
+        "from": {"id": 123},
+        "data": back_btn5["callback_data"],
+    })
+    assert snap.view == "full"
+    last_call_full = [p for m, p in bot.calls if m == "sendMessage"][-1]
+    ret_kb_full = last_call_full["reply_markup"]["inline_keyboard"]
+    assert any("К сводке" in b["text"] for row in ret_kb_full for b in row)
+
+
+@pytest.mark.asyncio
+async def test_bot_flow_expired_snapshot_handling():
+    """При устаревшем снимке действия more, full, list, filters возвращают сообщение об устаревании."""
+    bot = make_fake_bot(allowed_ids={123})
+    chat_id = 70
+    session = bot.dialog.sessions[chat_id] = Session(step=Step.DONE, dialog_id="d_test")
+
+    for act in ["more", "full", "list", "filters"]:
+        bot.calls.clear()
+        cq = {
+            "id": f"cq_{act}",
+            "message": {"chat": {"id": chat_id}, "message_id": 700},
+            "from": {"id": 123},
+            "data": f"{act}:{session.dialog_id}",
+        }
+        await bot.handle_callback(cq)
+        send_calls = [p for m, p in bot.calls if m == "sendMessage"]
+        assert len(send_calls) == 1
+        assert "Результаты поиска устарели" in send_calls[0]["text"]

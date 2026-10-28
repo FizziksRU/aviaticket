@@ -421,15 +421,16 @@ def build_compact_report(
         if not r.ok:
             continue
         for o in r.offers:
-            oid = o.offer_id or compute_offer_id(o)
-            if oid in seen_ids:
+            if not o.offer_id:
+                o.offer_id = compute_offer_id(o)
+            if o.offer_id in seen_ids:
                 continue
-            seen_ids.add(oid)
+            seen_ids.add(o.offer_id)
             unique_offers.append(o)
 
     pareto = pareto_front(unique_offers)
-    pareto_ids = {o.offer_id for o in pareto}
-    others = [o for o in unique_offers if o.offer_id not in pareto_ids]
+    pareto_set = {id(o) for o in pareto}
+    others = [o for o in unique_offers if id(o) not in pareto_set]
     others.sort(key=lambda o: (o.currency, o.price))
     pool = pareto + others
 
@@ -490,8 +491,6 @@ def build_compact_report(
     for r in results:
         if not r.ok:
             error_lines.append(f"⚠️ <b>{escape(r.site)}</b>: {escape(r.error or 'ошибка')}")
-    if error_lines:
-        error_lines.append("")
 
     empty_lines: list[str] = []
     if not pool:
@@ -554,20 +553,33 @@ def build_compact_report(
 def build_more_report(
     q: Query,
     pool: Sequence[Offer],
-    shown_count: int | Sequence[Offer] | set[str],
+    shown: Sequence[Offer] | set[str] | None = None,
     n: int = 5,
     *,
     start_number: int,
+    shown_count: Sequence[Offer] | set[str] | None = None,
 ) -> tuple[str | None, list[Offer]]:
-    """Формирует следующую порцию вариантов из pool или None, если больше нет."""
-    if isinstance(shown_count, int):
-        shown_ids = {o.offer_id for o in pool[:shown_count] if o.offer_id}
-    elif isinstance(shown_count, (set, frozenset)):
-        shown_ids = set(shown_count)
-    else:
-        shown_ids = {o.offer_id for o in shown_count if getattr(o, "offer_id", None)}
+    """Формирует следующую порцию вариантов из pool или None, если больше нет.
 
-    unshown = [o for o in pool if o.offer_id not in shown_ids]
+    Параметр `shown` (или `shown_count`): коллекция уже показанных билетов (Sequence[Offer])
+    или множество их идентификаторов (set[str]). Передача int не поддерживается,
+    так как карточки выбираются функцией pick_cards и не образуют префикс pool.
+    """
+    items = shown if shown is not None else shown_count
+    if items is None:
+        raise ValueError("Параметр shown (или shown_count) обязателен")
+    if isinstance(items, int):
+        raise TypeError(
+            "Передача int в shown_count не поддерживается, так как карточки pick_cards "
+            "не образуют префикс pool. Передайте Sequence[Offer] (например, snap.flat) "
+            "или множество идентификаторов set[str]."
+        )
+    if isinstance(items, (set, frozenset)):
+        shown_ids = set(items)
+    else:
+        shown_ids = {o.offer_id or compute_offer_id(o) for o in items}
+
+    unshown = [o for o in pool if (o.offer_id or compute_offer_id(o)) not in shown_ids]
     if not unshown:
         return None, []
 

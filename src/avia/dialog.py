@@ -110,7 +110,7 @@ def compact_keyboard(dialog_id: str, *, has_more: bool) -> list[list[tuple[str, 
 def full_keyboard(dialog_id: str) -> list[list[tuple[str, str]]]:
     return [
         [
-            ("⬅ К сводке", f"list:{dialog_id}"),
+            ("⬅ К сводке", f"list:{dialog_id}:compact"),
             ("🔎 Новый поиск", f"new:{dialog_id}"),
         ]
     ]
@@ -563,7 +563,9 @@ class Dialog:
                         keyboard=[[("🔎 Найти билет", "menu:go")]],
                     )
                 ]
-            if snap.view == "compact":
+            target_view = "compact" if (value == "compact" or snap.view == "compact") else "full"
+            if target_view == "compact":
+                snap.view = "compact"
                 chunks, compact_flat, pool = build_compact_report(
                     snap.query,
                     snap.results,
@@ -582,6 +584,7 @@ class Dialog:
                 replies.append(Reply(text=chunks[-1], keyboard=kb, edit=False))
                 return replies
             else:
+                snap.view = "full"
                 chunks, full_flat = build_report(
                     snap.query,
                     snap.results,
