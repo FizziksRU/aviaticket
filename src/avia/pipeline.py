@@ -208,6 +208,17 @@ async def _from_browser(site: SiteConfig, q: Query, settings: Settings) -> tuple
     return sorted(offers, key=lambda o: o.price), snap.url, partial
 
 
+async def _fallback_url(site: SiteConfig, q: Query, settings: Settings) -> str | None:
+    """Ссылка на выдачу сайта для ручной проверки, когда парсер не сработал."""
+    try:
+        if site.source == "api":
+            return search_url(q, settings.tp_marker)
+        extra = await resolve_extra(site, q)
+        return build_url(site, q, extra=extra)
+    except Exception:
+        return None
+
+
 async def _run_site(
     site: SiteConfig,
     q: Query,
@@ -270,7 +281,7 @@ async def _run_site(
             ok=False,
             offers=[],
             error=e.message,
-            page_url=e.page_url,
+            page_url=e.page_url or await _fallback_url(site, q, settings),
             elapsed=time.monotonic() - t0,
             partial=False,
             cached=False,
@@ -283,7 +294,7 @@ async def _run_site(
             ok=False,
             offers=[],
             error=err_msg,
-            page_url=None,
+            page_url=await _fallback_url(site, q, settings),
             elapsed=time.monotonic() - t0,
             partial=False,
             cached=False,

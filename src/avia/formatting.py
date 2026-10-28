@@ -27,6 +27,16 @@ def ozon_url(q: Query) -> str:
     )
 
 
+def _link_suffix(r: SiteResult) -> str:
+    if not r.page_url:
+        return ""
+    return f' — <a href="{escape(r.page_url, quote=True)}">открыть выдачу</a>'
+
+
+def _error_line(r: SiteResult) -> str:
+    return f"⚠️ <b>{escape(r.site)}</b>: {escape(r.error or 'ошибка')}" + _link_suffix(r)
+
+
 def _ago(ts: float, now: float | None = None) -> str:
     sec = max(0, (datetime.now().timestamp() if now is None else now) - ts)
     if sec < 3600:
@@ -224,14 +234,14 @@ def build_report(
 
     for r in results:
         if not r.ok:
-            block = [f"⚠️ <b>{escape(r.site)}</b>: {escape(r.error or 'ошибка')}", ""]
+            block = [_error_line(r), ""]
             if current_lines and not would_fit(block):
                 flush()
             current_lines.extend(block)
             continue
 
         if not r.offers:
-            block = [f"<b>{escape(r.site)}</b>: билетов не нашлось"]
+            block = [f"<b>{escape(r.site)}</b>: билетов не нашлось" + _link_suffix(r)]
             if r.partial:
                 block.append(escape("неполная выдача: сайт ещё догружал варианты"))
             if r.cached:
@@ -490,7 +500,7 @@ def build_compact_report(
     error_lines: list[str] = []
     for r in results:
         if not r.ok:
-            error_lines.append(f"⚠️ <b>{escape(r.site)}</b>: {escape(r.error or 'ошибка')}")
+            error_lines.append(_error_line(r))
 
     empty_lines: list[str] = []
     if not pool:

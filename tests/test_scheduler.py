@@ -490,8 +490,7 @@ def test_build_notification_text_and_markup():
     assert "15 000 ₽" in lines[3]
     assert "<i>tutu</i>" in lines[3]
     assert '<a href="https://avia.tutu.ru/offer/123?foo=1&amp;bar=2">купить билет</a>' in lines[3]
-    assert "Озон Тревел" in lines[3]
-    assert "https://www.ozon.ru/travel/flight/search" in lines[3]
+    assert "Озон" not in text
     assert "Фильтры: пересадки: только прямые, вылет: утром" in lines[4]
     assert len(text) <= 4096
 

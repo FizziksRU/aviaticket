@@ -8,7 +8,7 @@ import time
 from typing import Any, Callable
 
 from .filters import apply_criteria
-from .formatting import offer_line, offer_link_caption, ozon_url
+from .formatting import offer_line, offer_link_caption
 from .history import PriceHistory
 from .models import Offer, Query, SiteResult
 from .offers import assign_ids, filter_by_baggage
@@ -47,9 +47,7 @@ def build_notification(
     else:
         site_part = site_html
 
-    ozon_href = escape(ozon_url(sub.query()), quote=True)
-    ozon_part = f'<a href="{ozon_href}">Озон Тревел</a>'
-    lines.append(f"{offer_str} · {site_part} · {ozon_part}")
+    lines.append(f"{offer_str} · {site_part}")
 
     if sub.criteria:
         desc = sub.criteria.describe()

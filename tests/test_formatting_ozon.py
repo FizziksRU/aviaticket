@@ -37,3 +37,15 @@ def test_report_has_ozon_link_with_offers_and_fits():
     assert all(len(c) <= 4096 for c in chunks)
     assert "route=kufevnevnkuf" in chunks[-1]
     assert len(flat) > 0
+
+
+def test_failed_site_gets_link():
+    from avia.formatting import build_compact_report
+    from avia.criteria import SearchCriteria
+    from avia.models import SiteResult
+
+    r = SiteResult(site="tutu", ok=False, offers=[], error="капча", page_url="https://tutu.ru/x?a=1&b=2")
+    chunks, _, _ = build_compact_report(_q(), [r], SearchCriteria(), baggage_mode="any",
+                                        dropped_baggage=0, dropped_criteria=0)
+    text = "\n".join(chunks)
+    assert 'href="https://tutu.ru/x?a=1&amp;b=2"' in text
