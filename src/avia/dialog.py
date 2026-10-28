@@ -7,6 +7,7 @@ from enum import Enum
 from html import escape
 import secrets
 
+from .criteria import SearchCriteria
 from .formatting import build_report, format_details
 from .models import Offer, Query
 from .parsing import (
@@ -57,6 +58,7 @@ class Reply:
 class SearchRequest:
     query: Query
     baggage_mode: str = "any"
+    criteria: SearchCriteria = field(default_factory=SearchCriteria)
 
 
 @dataclass
