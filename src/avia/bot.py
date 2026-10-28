@@ -25,6 +25,7 @@ from .guard import friendly_error
 from .history import PriceHistory
 from .offers import assign_ids, filter_by_baggage
 from .pipeline import search
+from .scheduler import Scheduler
 from .store import ResultStore
 from .subscriptions import SubscriptionStore
 
@@ -264,9 +265,26 @@ class Bot:
                 except Exception:
                     pass
 
+    async def _scheduler_search(self, q):
+        # фоновый опрос не должен мешать поиску пользователя: ждём, пока чаты свободны
+        while self.busy:
+            await asyncio.sleep(10)
+        return await search(q, self.s)
+
+    async def _scheduler_notify(self, chat_id: int, text: str, reply_markup: dict | None) -> None:
+        await self.send(chat_id, text, reply_markup=reply_markup)
+
     async def run(self):
         offset = 0
         log.info("bot started")
+        if self.subs is not None:
+            scheduler = Scheduler(
+                self.subs,
+                self._scheduler_search,
+                self._scheduler_notify,
+                history=self.history,
+            )
+            self._scheduler_task = asyncio.create_task(scheduler.run_forever())
         while True:
             try:
                 updates = await self.call(
