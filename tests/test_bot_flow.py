@@ -113,7 +113,7 @@ async def test_bot_answer_callback_query_always_called():
     assert ans_calls[0]["callback_query_id"] == "cq_exp_2"
     assert ans_calls[0]["text"] == "Диалог устарел, начните заново"
 
-    # Сценарий 3: Заглушка отслеживания (menu:track)
+    # Сценарий 3: Раздел отслеживания (menu:track)
     bot.calls.clear()
     cq_track = {
         "id": "cq_track_3",
@@ -125,7 +125,6 @@ async def test_bot_answer_callback_query_always_called():
     ans_calls = [p for m, p in bot.calls if m == "answerCallbackQuery"]
     assert len(ans_calls) == 1
     assert ans_calls[0]["callback_query_id"] == "cq_track_3"
-    assert ans_calls[0]["text"] == "Скоро"
 
 
 @pytest.mark.asyncio

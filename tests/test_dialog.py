@@ -316,7 +316,7 @@ def test_dialog_expired_button():
     rep_help = dialog.on_callback(99999, "menu:help")
     assert "/price" in rep_help[0].text
     rep_track = dialog.on_callback(99999, "menu:track")
-    assert rep_track[0].answer == "Скоро"
+    assert rep_track[0].text == "Отслеживание недоступно"
 
 
 def test_dialog_all_callback_data_len_le_64(monkeypatch):
@@ -407,7 +407,7 @@ def test_dialog_ticket_number_flow():
 
     # Кнопка «🔔 Отслеживать цену»
     rep_track = dialog.on_callback(chat_id, "track:d107")
-    assert rep_track[0].answer == "Отслеживание появится позже"
+    assert rep_track[0].answer == "Отслеживание недоступно"
 
     # Кнопка «⬅ К списку» пересобирает build_report
     rep_list = dialog.on_callback(chat_id, "list:d107")
