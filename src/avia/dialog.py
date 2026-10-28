@@ -1,13 +1,18 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import date
 from enum import Enum
 from html import escape
 import secrets
 
-from .criteria import SearchCriteria
+from .criteria import (
+    ALLOWED_DAY_PARTS,
+    ALLOWED_MAX_TRANSFERS,
+    DAY_PARTS,
+    SearchCriteria,
+)
 from .formatting import build_report, format_details
 from .models import Offer, Query
 from .parsing import (
@@ -71,6 +76,7 @@ class Session:
     adults: int = 1
     baggage_mode: str = "any"
     dialog_id: str = field(default_factory=lambda: secrets.token_hex(2))
+    criteria: SearchCriteria = field(default_factory=SearchCriteria)
 
 
 def to_reply_markup(keyboard: list[list[tuple[str, str]]] | None) -> dict | None:
@@ -115,6 +121,8 @@ class Dialog:
         )
 
     def _baggage_reply(self, session: Session, *, edit: bool = False) -> Reply:
+        desc = session.criteria.describe()
+        adv_text = f"⚙ Расширенные настройки ({len(desc)})" if desc else "⚙ Расширенные настройки"
         return Reply(
             text="Багаж?",
             keyboard=[
@@ -124,10 +132,194 @@ class Dialog:
                     ("Не важно", f"bag:{session.dialog_id}:any"),
                 ],
                 [(f"Пассажиров: {session.adults}", f"pax:{session.dialog_id}:+")],
+                [(adv_text, f"adv:{session.dialog_id}:menu")],
                 [("✖ Отмена", f"cancel:{session.dialog_id}")],
             ],
             edit=edit,
         )
+
+    def _adv_menu_reply(self, session: Session) -> Reply:
+        desc = session.criteria.describe()
+        body = "\n".join(desc) if desc else "Всё не важно"
+        text = f"⚙ Расширенные настройки\n\n{body}"
+        return Reply(
+            text=text,
+            keyboard=[
+                [("Пересадки", f"adv:{session.dialog_id}:s_tr")],
+                [("Время в пути", f"adv:{session.dialog_id}:s_dur")],
+                [("Время вылета", f"adv:{session.dialog_id}:s_dp")],
+                [("Время прилёта", f"adv:{session.dialog_id}:s_ap")],
+                [("Баланс цены и времени", f"adv:{session.dialog_id}:s_hc")],
+                [("Сбросить всё", f"adv:{session.dialog_id}:reset")],
+                [("✅ Готово", f"adv:{session.dialog_id}:done")],
+                [("✖ Отмена", f"cancel:{session.dialog_id}")],
+            ],
+            edit=True,
+        )
+
+    def _adv_transfers_reply(self, session: Session) -> Reply:
+        return Reply(
+            text="⚙ Пересадки",
+            keyboard=[
+                [("Только прямые", f"adv:{session.dialog_id}:tr_0")],
+                [("До 1", f"adv:{session.dialog_id}:tr_1")],
+                [("До 2", f"adv:{session.dialog_id}:tr_2")],
+                [("Не важно", f"adv:{session.dialog_id}:tr_any")],
+                [("⬅ Назад", f"adv:{session.dialog_id}:menu")],
+            ],
+            edit=True,
+        )
+
+    def _adv_duration_reply(self, session: Session) -> Reply:
+        return Reply(
+            text="⚙ Время в пути",
+            keyboard=[
+                [("До 8 ч", f"adv:{session.dialog_id}:dur_8")],
+                [("До 15 ч", f"adv:{session.dialog_id}:dur_15")],
+                [("До 24 ч", f"adv:{session.dialog_id}:dur_24")],
+                [("Не важно", f"adv:{session.dialog_id}:dur_any")],
+                [("⬅ Назад", f"adv:{session.dialog_id}:menu")],
+            ],
+            edit=True,
+        )
+
+    def _adv_depart_reply(self, session: Session) -> Reply:
+        labels = {
+            "morning": "утро 06–12",
+            "day": "день 12–18",
+            "evening": "вечер 18–24",
+            "night": "ночь 00–06",
+        }
+        rows: list[list[tuple[str, str]]] = []
+        for part in DAY_PARTS:
+            lbl = labels.get(part, part)
+            if part in session.criteria.depart_parts:
+                lbl = f"✓ {lbl}"
+            rows.append([(lbl, f"adv:{session.dialog_id}:dp_{part}")])
+        rows.append([("Не важно", f"adv:{session.dialog_id}:dp_any")])
+        rows.append([("⬅ Назад", f"adv:{session.dialog_id}:menu")])
+        return Reply(text="⚙ Время вылета", keyboard=rows, edit=True)
+
+    def _adv_arrive_reply(self, session: Session) -> Reply:
+        labels = {
+            "morning": "утро 06–12",
+            "day": "день 12–18",
+            "evening": "вечер 18–24",
+            "night": "ночь 00–06",
+        }
+        rows: list[list[tuple[str, str]]] = []
+        for part in DAY_PARTS:
+            lbl = labels.get(part, part)
+            if part in session.criteria.arrive_parts:
+                lbl = f"✓ {lbl}"
+            rows.append([(lbl, f"adv:{session.dialog_id}:ap_{part}")])
+        rows.append([("Не важно", f"adv:{session.dialog_id}:ap_any")])
+        rows.append([("⬅ Назад", f"adv:{session.dialog_id}:menu")])
+        return Reply(text="⚙ Время прилёта", keyboard=rows, edit=True)
+
+    def _adv_balance_reply(self, session: Session) -> Reply:
+        text = (
+            "⚙ Баланс цены и времени\n\n"
+            "Цена + стоимость часа в пути, показывается отдельная карточка «Лучший баланс»."
+        )
+        keyboard = [
+            [("500 ₽/ч", f"adv:{session.dialog_id}:hc_500")],
+            [("1000 ₽/ч", f"adv:{session.dialog_id}:hc_1000")],
+            [("2000 ₽/ч", f"adv:{session.dialog_id}:hc_2000")],
+            [("Выключить", f"adv:{session.dialog_id}:hc_off")],
+            [("⬅ Назад", f"adv:{session.dialog_id}:menu")],
+        ]
+        return Reply(text=text, keyboard=keyboard, edit=True)
+
+    def _on_adv_callback(self, session: Session, value: str) -> Reply:
+        if value == "menu":
+            return self._adv_menu_reply(session)
+        if value == "s_tr":
+            return self._adv_transfers_reply(session)
+        if value == "s_dur":
+            return self._adv_duration_reply(session)
+        if value == "s_dp":
+            return self._adv_depart_reply(session)
+        if value == "s_ap":
+            return self._adv_arrive_reply(session)
+        if value == "s_hc":
+            return self._adv_balance_reply(session)
+        if value == "reset":
+            session.criteria = SearchCriteria()
+            return self._adv_menu_reply(session)
+        if value == "done":
+            return self._baggage_reply(session, edit=True)
+
+        if value == "tr_any":
+            session.criteria = replace(session.criteria, max_transfers=None)
+            return self._adv_menu_reply(session)
+        if value.startswith("tr_"):
+            try:
+                num = int(value.removeprefix("tr_"))
+                if num in ALLOWED_MAX_TRANSFERS:
+                    session.criteria = replace(session.criteria, max_transfers=num)
+                    return self._adv_menu_reply(session)
+            except ValueError:
+                pass
+            return self._adv_menu_reply(session)
+
+        if value == "dur_any":
+            session.criteria = replace(session.criteria, max_duration_hours=None)
+            return self._adv_menu_reply(session)
+        if value.startswith("dur_"):
+            try:
+                hours = int(value.removeprefix("dur_"))
+                if hours in (8, 15, 24):
+                    session.criteria = replace(session.criteria, max_duration_hours=hours)
+                    return self._adv_menu_reply(session)
+            except ValueError:
+                pass
+            return self._adv_menu_reply(session)
+
+        if value == "dp_any":
+            session.criteria = replace(session.criteria, depart_parts=frozenset())
+            return self._adv_depart_reply(session)
+        if value.startswith("dp_"):
+            part = value.removeprefix("dp_")
+            if part in ALLOWED_DAY_PARTS:
+                cur = set(session.criteria.depart_parts)
+                if part in cur:
+                    cur.remove(part)
+                else:
+                    cur.add(part)
+                session.criteria = replace(session.criteria, depart_parts=frozenset(cur))
+                return self._adv_depart_reply(session)
+            return self._adv_menu_reply(session)
+
+        if value == "ap_any":
+            session.criteria = replace(session.criteria, arrive_parts=frozenset())
+            return self._adv_arrive_reply(session)
+        if value.startswith("ap_"):
+            part = value.removeprefix("ap_")
+            if part in ALLOWED_DAY_PARTS:
+                cur = set(session.criteria.arrive_parts)
+                if part in cur:
+                    cur.remove(part)
+                else:
+                    cur.add(part)
+                session.criteria = replace(session.criteria, arrive_parts=frozenset(cur))
+                return self._adv_arrive_reply(session)
+            return self._adv_menu_reply(session)
+
+        if value in ("hc_off", "hc_any"):
+            session.criteria = replace(session.criteria, hour_cost=None)
+            return self._adv_menu_reply(session)
+        if value.startswith("hc_"):
+            try:
+                cost = int(value.removeprefix("hc_"))
+                if cost in (500, 1000, 2000):
+                    session.criteria = replace(session.criteria, hour_cost=cost)
+                    return self._adv_menu_reply(session)
+            except ValueError:
+                pass
+            return self._adv_menu_reply(session)
+
+        return self._adv_menu_reply(session)
 
     def _sug_code(self, sugg: str) -> str:
         try:
@@ -227,6 +419,14 @@ class Dialog:
                 return [self._baggage_reply(session, edit=True)]
             return []
 
+        if action == "adv":
+            if session.step != Step.BAGGAGE:
+                return []
+            if value == "cancel":
+                self.sessions.pop(chat_id, None)
+                return [self.start_menu(chat_id)]
+            return [self._on_adv_callback(session, value)]
+
         if action == "bag":
             mode = value if value in {"with", "without", "any"} else "any"
             session.baggage_mode = mode
@@ -249,7 +449,13 @@ class Dialog:
                 adults=session.adults,
                 return_date=session.return_date,
             )
-            return [SearchRequest(query=q, baggage_mode=session.baggage_mode)]
+            return [
+                SearchRequest(
+                    query=q,
+                    baggage_mode=session.baggage_mode,
+                    criteria=session.criteria,
+                )
+            ]
 
         if action == "go":
             session.return_date = None
@@ -261,7 +467,13 @@ class Dialog:
                 adults=session.adults,
                 return_date=None,
             )
-            return [SearchRequest(query=q, baggage_mode=session.baggage_mode)]
+            return [
+                SearchRequest(
+                    query=q,
+                    baggage_mode=session.baggage_mode,
+                    criteria=session.criteria,
+                )
+            ]
 
         if action == "track":
             return [Reply(answer="Отслеживание появится позже")]
