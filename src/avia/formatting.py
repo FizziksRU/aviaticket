@@ -24,6 +24,43 @@ def ozon_url(q: Query) -> str:
     )
 
 
+def _ago(ts: float, now: float | None = None) -> str:
+    sec = max(0, (datetime.now().timestamp() if now is None else now) - ts)
+    if sec < 3600:
+        return f"{max(1, int(sec // 60))} мин назад"
+    if sec < 86400:
+        return f"{int(sec // 3600)} ч назад"
+    return f"{int(sec // 86400)} дн назад"
+
+
+def price_change_short(o: Offer) -> str:
+    """Короткая пометка к цене в списке: (↓500 ₽) или (↑500 ₽); пусто, если цена не менялась."""
+    if o.prev_price is None or o.prev_price == o.price:
+        return ""
+    diff = o.price - o.prev_price
+    arrow = "↑" if diff > 0 else "↓"
+    return f" ({arrow}{money(abs(diff), o.currency)})"
+
+
+def price_change_card(o: Offer, now: float | None = None) -> str | None:
+    """Строка для карточки: как изменилась цена с прошлого наблюдения."""
+    if o.prev_price is None or o.prev_at is None:
+        return None
+    when = _ago(o.prev_at, now)
+    diff = o.price - o.prev_price
+    if diff == 0:
+        text = f"Цена не менялась с прошлого раза ({when}): {money(o.price, o.currency)}"
+    else:
+        word = "выросла" if diff > 0 else "упала"
+        text = (
+            f"Цена {word} на {money(abs(diff), o.currency)}: "
+            f"было {money(o.prev_price, o.currency)} ({when})"
+        )
+    if o.min_price is not None and o.min_price < min(o.price, o.prev_price):
+        text += f"; самая низкая за наблюдения: {money(o.min_price, o.currency)}"
+    return text
+
+
 def money(value: int, currency: str) -> str:
     s = f"{value:,}".replace(",", " ")
     return f"{s} {SYMBOLS.get(currency, currency)}"
@@ -78,7 +115,7 @@ def _format_leg_brief(leg: Offer | Leg, prefix: str, *, include_duration: bool =
 
 
 def _build_roundtrip_line(o: Offer, *, baggage_mode: str, include_duration: bool) -> str:
-    parts = [f"<b>{money(o.price, o.currency)}</b>"]
+    parts = [f"<b>{money(o.price, o.currency)}</b>{price_change_short(o)}"]
     airline = _airline_label(o)
     if airline:
         parts.append(airline)
@@ -105,7 +142,7 @@ def offer_line(o: Offer, *, baggage_mode: str = "any") -> str:
             line = _build_roundtrip_line(o, baggage_mode=baggage_mode, include_duration=False)
         return line
 
-    parts = [f"<b>{money(o.price, o.currency)}</b>"]
+    parts = [f"<b>{money(o.price, o.currency)}</b>{price_change_short(o)}"]
     if o.airline:
         parts.append(escape(o.airline))
     if o.depart_time and o.arrive_time:
@@ -357,6 +394,9 @@ def format_details(o: Offer, q: Query) -> str:
     lines.append(f"Багаж: {baggage_val}")
     lines.append(f"Ручная кладь: {carry_on_val}")
     lines.append(f"Цена: <b>{money(o.price, o.currency)}</b>")
+    change = price_change_card(o)
+    if change:
+        lines.append(change)
     lines.append(f"Сайт: {escape(o.site)}")
 
     if o.url:

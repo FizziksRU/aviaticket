@@ -11,6 +11,7 @@ from .config import Settings, load_settings
 from .dialog import Dialog, HELP, Reply, SearchRequest, Step, to_reply_markup
 from .formatting import build_report, format_details
 from .guard import friendly_error
+from .history import PriceHistory
 from .offers import assign_ids, filter_by_baggage
 from .pipeline import search
 from .store import ResultStore
@@ -33,6 +34,7 @@ class Bot:
         self.s = settings
         self.http = httpx.AsyncClient(timeout=70)
         self.busy: set[int] = set()
+        self.history = PriceHistory(settings.storage_dir / "history.sqlite")
         if dialog is not None:
             self.dialog = dialog
             self.store = store if store is not None else dialog.store
@@ -135,6 +137,10 @@ class Bot:
 
             results = await search(q, self.s)
             results = assign_ids(results)
+            try:
+                await asyncio.to_thread(self.history.annotate, q, results)
+            except Exception:
+                log.exception("история цен недоступна")
             filtered, dropped = filter_by_baggage(results, baggage_mode)
             chunks, flat = build_report(
                 q,

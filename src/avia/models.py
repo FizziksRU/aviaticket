@@ -50,6 +50,9 @@ class Offer:
     fetched_at: float | None = None
     back: Leg | None = None
     url_is_direct: bool = False
+    prev_price: int | None = None   # цена этого билета при прошлом наблюдении
+    prev_at: float | None = None    # когда она была снята (epoch)
+    min_price: int | None = None    # минимальная цена этого билета за прошлые наблюдения
 
 
 @dataclass
