@@ -1,5 +1,6 @@
 from datetime import date
 
+from avia.criteria import SearchCriteria
 from avia.models import Offer, Query, SiteResult
 from avia.store import ResultStore, SearchSnapshot
 
@@ -69,3 +70,33 @@ def test_result_store_docstring_explains_in_memory_choice():
     assert "один процесс" in doc
     assert "SQLite" in doc
     assert "отслеживани" in doc
+
+
+def test_result_store_put_with_optional_fields():
+    """Проверка сохранения снимка с дополнительными полями (criteria, pool, shown, view, dropped)."""
+    q = Query("MOW", "ALA", date(2026, 12, 10))
+    crit = SearchCriteria(max_transfers=1)
+    o1 = Offer("site1", 10000, offer_id="id1")
+    pool = [o1]
+    store = ResultStore()
+
+    snap = store.put(
+        chat_id=555,
+        query=q,
+        results=[],
+        baggage_mode="with",
+        flat=[o1],
+        criteria=crit,
+        pool=pool,
+        shown=1,
+        view="compact",
+        dropped_baggage=2,
+        dropped_criteria=3,
+    )
+
+    assert snap.criteria == crit
+    assert snap.pool == pool
+    assert snap.shown == 1
+    assert snap.view == "compact"
+    assert snap.dropped_baggage == 2
+    assert snap.dropped_criteria == 3

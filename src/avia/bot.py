@@ -4,12 +4,23 @@ from __future__ import annotations
 import asyncio
 from html import escape
 import logging
+import secrets
 
 import httpx
 
 from .config import Settings, load_settings
-from .dialog import Dialog, HELP, Reply, SearchRequest, Step, to_reply_markup
-from .formatting import build_report, format_details
+from .dialog import (
+    HELP,
+    Dialog,
+    Reply,
+    SearchRequest,
+    Session,
+    Step,
+    compact_keyboard,
+    to_reply_markup,
+)
+from .filters import apply_criteria
+from .formatting import build_compact_report, build_report, format_details
 from .guard import friendly_error
 from .history import PriceHistory
 from .offers import assign_ids, filter_by_baggage
@@ -141,20 +152,57 @@ class Bot:
                 await asyncio.to_thread(self.history.annotate, q, results)
             except Exception:
                 log.exception("история цен недоступна")
-            filtered, dropped = filter_by_baggage(results, baggage_mode)
-            chunks, flat = build_report(
+            filtered_crit, dropped_criteria = apply_criteria(results, req.criteria)
+            filtered, dropped_baggage = filter_by_baggage(filtered_crit, baggage_mode)
+            chunks, flat, pool = build_compact_report(
                 q,
                 filtered,
-                self.s.top_n,
+                req.criteria,
                 baggage_mode=baggage_mode,
-                dropped=dropped,
+                dropped_baggage=dropped_baggage,
+                dropped_criteria=dropped_criteria,
             )
-            for chunk in chunks:
-                await self.send(chat_id, chunk)
-            self.store.put(chat_id, q, filtered, baggage_mode, flat)
+
             session = self.dialog.sessions.get(chat_id)
-            if session:
+            if session is None or not session.dialog_id:
+                session = Session(
+                    step=Step.DONE,
+                    origin=q.origin,
+                    destination=q.destination,
+                    depart=q.depart,
+                    return_date=q.return_date,
+                    adults=q.adults,
+                    baggage_mode=baggage_mode,
+                    criteria=req.criteria,
+                    dialog_id=secrets.token_hex(2),
+                )
+                self.dialog.sessions[chat_id] = session
+            else:
                 session.step = Step.DONE
+
+            d_id = session.dialog_id
+            shown_ids = {o.offer_id for o in flat if o.offer_id}
+            has_more = any(o.offer_id not in shown_ids for o in pool)
+            kb = compact_keyboard(d_id, has_more=has_more)
+            reply_markup = to_reply_markup(kb)
+
+            for i, chunk in enumerate(chunks):
+                rm = reply_markup if i == len(chunks) - 1 else None
+                await self.send(chat_id, chunk, reply_markup=rm)
+
+            self.store.put(
+                chat_id,
+                q,
+                filtered,
+                baggage_mode,
+                flat,
+                criteria=req.criteria,
+                pool=pool,
+                shown=len(flat),
+                view="compact",
+                dropped_baggage=dropped_baggage,
+                dropped_criteria=dropped_criteria,
+            )
         except Exception as e:
             log.exception("search failed")
             await self.send(chat_id, f"⚠️ {escape(friendly_error(e))}")

@@ -13,7 +13,12 @@ from .criteria import (
     DAY_PARTS,
     SearchCriteria,
 )
-from .formatting import build_report, format_details
+from .formatting import (
+    build_compact_report,
+    build_more_report,
+    build_report,
+    format_details,
+)
 from .models import Offer, Query
 from .parsing import (
     ParseError,
@@ -88,6 +93,27 @@ def to_reply_markup(keyboard: list[list[tuple[str, str]]] | None) -> dict | None
             for row in keyboard
         ]
     }
+
+
+def compact_keyboard(dialog_id: str, *, has_more: bool) -> list[list[tuple[str, str]]]:
+    rows: list[list[tuple[str, str]]] = []
+    if has_more:
+        rows.append([("➕ Показать ещё 5", f"more:{dialog_id}")])
+    rows.append([
+        ("⚙ Изменить фильтры", f"filters:{dialog_id}"),
+        ("📋 Полный список", f"full:{dialog_id}"),
+    ])
+    rows.append([("🔎 Новый поиск", f"new:{dialog_id}")])
+    return rows
+
+
+def full_keyboard(dialog_id: str) -> list[list[tuple[str, str]]]:
+    return [
+        [
+            ("⬅ К сводке", f"list:{dialog_id}"),
+            ("🔎 Новый поиск", f"new:{dialog_id}"),
+        ]
+    ]
 
 
 class Dialog:
@@ -481,6 +507,53 @@ class Dialog:
         if action == "new":
             return [self._start_search(chat_id)]
 
+        if action == "more":
+            snap = self.store.get(chat_id)
+            if snap is None:
+                return [
+                    Reply(
+                        text="Результаты поиска устарели, начните новый поиск",
+                        keyboard=[[("🔎 Найти билет", "menu:go")]],
+                    )
+                ]
+            text, new_offers = build_more_report(
+                snap.query,
+                snap.pool,
+                snap.flat,
+                n=5,
+                start_number=len(snap.flat) + 1,
+            )
+            if not text or not new_offers:
+                return []
+            snap.flat.extend(new_offers)
+            snap.shown += len(new_offers)
+            shown_ids = {o.offer_id for o in snap.flat if o.offer_id}
+            has_more = any(o.offer_id not in shown_ids for o in snap.pool)
+            kb = compact_keyboard(session.dialog_id, has_more=has_more)
+            return [Reply(text=text, keyboard=kb, edit=False)]
+
+        if action == "full":
+            snap = self.store.get(chat_id)
+            if snap is None:
+                return [
+                    Reply(
+                        text="Результаты поиска устарели, начните новый поиск",
+                        keyboard=[[("🔎 Найти билет", "menu:go")]],
+                    )
+                ]
+            chunks, full_flat = build_report(
+                snap.query,
+                snap.results,
+                baggage_mode=snap.baggage_mode,
+                dropped=snap.dropped_baggage,
+            )
+            snap.flat = full_flat
+            snap.view = "full"
+            kb = full_keyboard(session.dialog_id)
+            replies = [Reply(text=chunk, edit=False) for chunk in chunks[:-1]]
+            replies.append(Reply(text=chunks[-1], keyboard=kb, edit=False))
+            return replies
+
         if action == "list":
             snap = self.store.get(chat_id)
             if snap is None:
@@ -490,12 +563,59 @@ class Dialog:
                         keyboard=[[("🔎 Найти билет", "menu:go")]],
                     )
                 ]
-            chunks, _ = build_report(
-                snap.query,
-                snap.results,
+            if snap.view == "compact":
+                chunks, compact_flat, pool = build_compact_report(
+                    snap.query,
+                    snap.results,
+                    snap.criteria,
+                    baggage_mode=snap.baggage_mode,
+                    dropped_baggage=snap.dropped_baggage,
+                    dropped_criteria=snap.dropped_criteria,
+                )
+                snap.flat = compact_flat
+                snap.pool = pool
+                snap.shown = len(compact_flat)
+                shown_ids = {o.offer_id for o in compact_flat if o.offer_id}
+                has_more = any(o.offer_id not in shown_ids for o in pool)
+                kb = compact_keyboard(session.dialog_id, has_more=has_more)
+                replies = [Reply(text=chunk, edit=False) for chunk in chunks[:-1]]
+                replies.append(Reply(text=chunks[-1], keyboard=kb, edit=False))
+                return replies
+            else:
+                chunks, full_flat = build_report(
+                    snap.query,
+                    snap.results,
+                    baggage_mode=snap.baggage_mode,
+                    dropped=snap.dropped_baggage,
+                )
+                snap.flat = full_flat
+                kb = full_keyboard(session.dialog_id)
+                replies = [Reply(text=chunk, edit=False) for chunk in chunks[:-1]]
+                replies.append(Reply(text=chunks[-1], keyboard=kb, edit=False))
+                return replies
+
+        if action == "filters":
+            snap = self.store.get(chat_id)
+            if snap is None:
+                return [
+                    Reply(
+                        text="Результаты поиска устарели, начните новый поиск",
+                        keyboard=[[("🔎 Найти билет", "menu:go")]],
+                    )
+                ]
+            new_session = Session(
+                step=Step.BAGGAGE,
+                origin=snap.query.origin,
+                destination=snap.query.destination,
+                depart=snap.query.depart,
+                return_date=snap.query.return_date,
+                adults=snap.query.adults,
                 baggage_mode=snap.baggage_mode,
+                criteria=snap.criteria,
+                dialog_id=secrets.token_hex(2),
             )
-            return [Reply(text=chunk) for chunk in chunks]
+            self.sessions[chat_id] = new_session
+            return [self._baggage_reply(new_session, edit=False)]
 
         return []
 

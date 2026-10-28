@@ -2,9 +2,12 @@ from __future__ import annotations
 
 from datetime import date, datetime
 from html import escape
+from typing import Sequence
 
+from .criteria import SearchCriteria
+from .filters import pareto_front, pick_cards
 from .models import Leg, Offer, Query, SiteResult
-from .offers import baggage_state
+from .offers import baggage_state, compute_offer_id
 from .parsing import city_name
 
 SYMBOLS = {"RUB": "₽", "KZT": "₸", "UZS": "сум", "USD": "$", "EUR": "€"}
@@ -379,6 +382,213 @@ def _format_leg_details(
     return lines
 
 
+def offer_link_caption(o: Offer) -> str:
+    """Подпись для ссылки на билет: 'купить билет' для прямых ссылок, иначе 'открыть выдачу сайта'."""
+    return "купить билет" if o.url_is_direct else "открыть выдачу сайта"
+
+
+def offer_link_html(o: Offer) -> str | None:
+    """Формирует HTML-ссылку на билет или None, если URL отсутствует."""
+    if not o.url:
+        return None
+    caption = offer_link_caption(o)
+    return f'<a href="{escape(o.url, quote=True)}">{caption}</a>'
+
+
+def _collect_layovers(o: Offer) -> list[str]:
+    res: list[str] = []
+    if o.layovers:
+        res.extend(l for l in o.layovers if l)
+    if o.back and o.back.layovers:
+        res.extend(l for l in o.back.layovers if l)
+    return res
+
+
+def build_compact_report(
+    q: Query,
+    results: Sequence[SiteResult],
+    criteria: SearchCriteria,
+    *,
+    baggage_mode: str = "any",
+    dropped_baggage: int = 0,
+    dropped_criteria: int = 0,
+) -> tuple[list[str], list[Offer], list[Offer]]:
+    """Формирует компактный отчёт с карточками (pick_cards), плоским списком (flat) и пулом билетов (pool)."""
+    # 1. pool = все билеты успешных сайтов (дедуп по offer_id), упорядоченный: pareto_front, затем остальные по цене
+    unique_offers: list[Offer] = []
+    seen_ids: set[str] = set()
+    for r in results:
+        if not r.ok:
+            continue
+        for o in r.offers:
+            oid = o.offer_id or compute_offer_id(o)
+            if oid in seen_ids:
+                continue
+            seen_ids.add(oid)
+            unique_offers.append(o)
+
+    pareto = pareto_front(unique_offers)
+    pareto_ids = {o.offer_id for o in pareto}
+    others = [o for o in unique_offers if o.offer_id not in pareto_ids]
+    others.sort(key=lambda o: (o.currency, o.price))
+    pool = pareto + others
+
+    # 2. Карточки pick_cards (до 3 шт), flat = билеты карточек по порядку
+    cards = pick_cards(pool, criteria)
+    flat = [o for _, o in cards]
+
+    # 3. Шапка отчёта
+    orig_name = city_name(q.origin)
+    dest_name = city_name(q.destination)
+    route_head = f"✈️ <b>{escape(orig_name)} → {escape(dest_name)}</b>"
+    if q.return_date:
+        date_str = f"туда {q.depart:%d.%m.%Y}, обратно {q.return_date:%d.%m.%Y}"
+        head = (
+            f"{route_head}, "
+            f"{date_str}, пассажиров: {q.adults} (цена общая за оба плеча)"
+        )
+    else:
+        date_str = f"{q.depart:%d.%m.%Y}"
+        head = f"{route_head}, {date_str}, пассажиров: {q.adults}"
+
+    header_lines = [head]
+
+    crit_desc = criteria.describe()
+    filter_parts: list[str] = []
+    if crit_desc:
+        filter_parts.append(", ".join(crit_desc))
+    if dropped_criteria > 0:
+        filter_parts.append(f"скрыто фильтрами: {dropped_criteria}")
+    if filter_parts:
+        header_lines.append(f"Фильтры: {', '.join(filter_parts)}")
+
+    if baggage_mode != "any":
+        b_mode_str = "только с багажом" if baggage_mode == "with" else "только без багажа"
+        header_lines.append(
+            f"Багаж: {b_mode_str}, скрыто вариантов: {dropped_baggage} (варианты без данных о багаже показаны)"
+        )
+
+    header_lines.append("")
+
+    card_blocks: list[list[str]] = []
+    for counter, (title, o) in enumerate(cards, start=1):
+        card = [
+            f"{counter}. <b>{escape(title)}</b>",
+            offer_line(o, baggage_mode=baggage_mode),
+            f"<i>{escape(o.site)}</i>",
+        ]
+        layovers = _collect_layovers(o)
+        if layovers:
+            card.append(f"пересадка: {', '.join(escape(l) for l in layovers)}")
+        link = offer_link_html(o)
+        if link:
+            card.append(link)
+        card.append("")
+        card_blocks.append(card)
+
+    error_lines: list[str] = []
+    for r in results:
+        if not r.ok:
+            error_lines.append(f"⚠️ <b>{escape(r.site)}</b>: {escape(r.error or 'ошибка')}")
+    if error_lines:
+        error_lines.append("")
+
+    empty_lines: list[str] = []
+    if not pool:
+        empty_lines.append("Билетов не нашлось")
+        if not criteria.is_default():
+            empty_lines.append("Попробуйте ослабить фильтры.")
+        empty_lines.append("")
+
+    footer_lines = [
+        f'Озон Тревел: <a href="{escape(ozon_url(q), quote=True)}">открыть выдачу</a> '
+        "(цены Озона бот не проверяет)",
+        "<i>Цены сняты со страницы сейчас, при покупке могут измениться.</i>",
+    ]
+    if flat:
+        footer_lines.append("Напишите номер билета, чтобы увидеть подробности.")
+
+    chunks: list[str] = []
+    current_lines: list[str] = []
+
+    def flush() -> None:
+        nonlocal current_lines
+        if current_lines:
+            text = "\n".join(current_lines).strip()
+            if text:
+                chunks.append(text)
+            current_lines = []
+
+    def would_fit(lines_to_add: list[str]) -> bool:
+        if not current_lines:
+            return True
+        return len("\n".join(current_lines + lines_to_add)) <= 4000
+
+    current_lines.extend(header_lines)
+
+    for card in card_blocks:
+        if current_lines and not would_fit(card):
+            flush()
+        current_lines.extend(card)
+
+    for err in error_lines:
+        if current_lines and not would_fit([err]):
+            flush()
+        current_lines.append(err)
+    if error_lines:
+        current_lines.append("")
+
+    if empty_lines:
+        if current_lines and not would_fit(empty_lines):
+            flush()
+        current_lines.extend(empty_lines)
+
+    if current_lines and not would_fit(footer_lines):
+        flush()
+    current_lines.extend(footer_lines)
+    flush()
+
+    return chunks, flat, pool
+
+
+def build_more_report(
+    q: Query,
+    pool: Sequence[Offer],
+    shown_count: int | Sequence[Offer] | set[str],
+    n: int = 5,
+    *,
+    start_number: int,
+) -> tuple[str | None, list[Offer]]:
+    """Формирует следующую порцию вариантов из pool или None, если больше нет."""
+    if isinstance(shown_count, int):
+        shown_ids = {o.offer_id for o in pool[:shown_count] if o.offer_id}
+    elif isinstance(shown_count, (set, frozenset)):
+        shown_ids = set(shown_count)
+    else:
+        shown_ids = {o.offer_id for o in shown_count if getattr(o, "offer_id", None)}
+
+    unshown = [o for o in pool if o.offer_id not in shown_ids]
+    if not unshown:
+        return None, []
+
+    new_offers = unshown[:n]
+    blocks: list[str] = []
+    for counter, o in enumerate(new_offers, start=start_number):
+        lines = [
+            f"{counter}. {offer_line(o)}",
+            f"<i>{escape(o.site)}</i>",
+        ]
+        layovers = _collect_layovers(o)
+        if layovers:
+            lines.append(f"пересадка: {', '.join(escape(l) for l in layovers)}")
+        link = offer_link_html(o)
+        if link:
+            lines.append(link)
+        blocks.append("\n".join(lines))
+
+    return "\n\n".join(blocks), new_offers
+
+
 def format_details(o: Offer, q: Query) -> str:
     """Формирует подробную карточку билета для отправки в чат."""
     lines = _format_leg_details(o, q.origin, q.destination, q.depart, is_back=False)
@@ -400,8 +610,7 @@ def format_details(o: Offer, q: Query) -> str:
     lines.append(f"Сайт: {escape(o.site)}")
 
     if o.url:
-        caption = "купить билет" if o.url_is_direct else "открыть выдачу сайта"
-        lines.append(f'Ссылка: <a href="{escape(o.url, quote=True)}">{caption}</a>')
+        lines.append(f"Ссылка: {offer_link_html(o)}")
         if not o.url_is_direct:
             criteria: list[str] = []
             has_time = bool(o.depart_time or o.depart_at or (o.back and (o.back.depart_time or o.back.depart_at)))

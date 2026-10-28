@@ -217,8 +217,8 @@ async def test_bot_long_report_multiple_messages(monkeypatch):
 
     monkeypatch.setattr("avia.bot.search", mock_search)
     monkeypatch.setattr(
-        "avia.bot.build_report",
-        lambda q, res, top_n, **kw: (["Часть 1 отчёта", "Часть 2 отчёта", "Часть 3 отчёта"], []),
+        "avia.bot.build_compact_report",
+        lambda q, res, criteria, **kw: (["Часть 1 отчёта", "Часть 2 отчёта", "Часть 3 отчёта"], [], []),
     )
 
     msg = {
