@@ -317,6 +317,13 @@ async def _replay_post_request(
         logger.warning("Повтор запроса: исключение при выполнении fetch (%s)", type(e).__name__)
 
 
+def _window_args(headless: bool) -> list[str]:
+    """Видимое окно уводим за край экрана свёрнутым, чтобы оно не мешало работе."""
+    if headless:
+        return []
+    return ["--window-position=-3000,-3000", "--start-minimized"]
+
+
 async def fetch_snapshot(
     url: str,
     site: SiteConfig,
@@ -341,13 +348,14 @@ async def fetch_snapshot(
                 ctx = await pw.chromium.launch_persistent_context(
                     str(p_dir),
                     headless=headless,
+                    args=_window_args(headless),
                     locale="ru-RU",
                     timezone_id="Europe/Moscow",
                     viewport={"width": 1366, "height": 900},
                 )
                 browser = getattr(ctx, "browser", None)
             else:
-                browser = await pw.chromium.launch(headless=headless)
+                browser = await pw.chromium.launch(headless=headless, args=_window_args(headless))
                 ctx = await browser.new_context(
                     locale="ru-RU",
                     timezone_id="Europe/Moscow",

@@ -787,3 +787,11 @@ def test_is_blocked_ozon_challenge_page():
 
     text = "Похоже, нет соединения\nИнцидент: fab_chlg_20261027011106_01M5XEJD20TBDT7PFFHPR8BP9T"
     assert is_blocked(text)
+
+
+def test_window_args_offscreen_only_when_visible():
+    from avia.collector import _window_args
+
+    assert _window_args(True) == []
+    args = _window_args(False)
+    assert "--window-position=-3000,-3000" in args and "--start-minimized" in args
