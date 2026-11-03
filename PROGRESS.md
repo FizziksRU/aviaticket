@@ -1,7 +1,7 @@
 # PROGRESS
 
-**Статус:** фазы 2–3 и 6 параллельно: матрица A готова, B/C считаются, ветки `scale-audit-telegram`, `scale-audit-queue` готовы.
-**Обновлено:** 2026-11-03 20:50 UTC
+**Статус:** фаза 2 ✅, 3 ⏳ (B/C считаются), 4 ✅, 6 ⏳ (6 веток готовы).
+**Обновлено:** 2026-11-03 21:14 UTC
 
 ## Как продолжить после обрыва сессии
 - Работа идёт в worktree `~/avia-scale/work`, ветка `scale-audit`. `~/avia-scale/aviaticket` — checkout владельца с `.env`, туда не заходить.
@@ -16,9 +16,9 @@
 |---|------|--------|----------|
 | 0 | Форк, секреты, Telegram | ✅ | `tools/`, `DECISIONS.md` |
 | 1 | Инвентаризация, тесты, CLI | ✅ | `docs/audit/01_current_state.md` |
-| 2 | DroidHub: контракт и замеры | ⏳ | `docs/audit/02_droidhub.md` |
+| 2 | DroidHub: контракт и замеры | ✅ | `docs/audit/02_droidhub.md` |
 | 3 | Модель мощности и моки | ⏳ | `docs/audit/03_capacity.md`, `loadtest/` |
-| 4 | Техдолг | — | `docs/audit/04_tech_debt.md` |
+| 4 | Техдолг | ✅ | `docs/audit/04_tech_debt.md` |
 | 5 | Roadmap и ADR | — | `docs/audit/05_roadmap.md`, `docs/adr/` |
 | 6 | Быстрые улучшения | ⏳ | ветки `scale-audit-<тема>` в worktree `~/avia-scale/dev`, `docs/audit/06_changes.md` |
 | 7 | Итог | — | `docs/audit/00_SUMMARY.md` |
@@ -39,3 +39,8 @@
 - 20:44 ветка `scale-audit-telegram` (4b351e3): разбиение HTML на 4096, ретрай 429, fallback без parse_mode. Ветка `scale-audit-queue` (464153e): PrioritySlots (SEARCH_PRIORITY), «Вы N-й в очереди» (QUEUE_NOTICE), GUARD_MIN_INTERVAL/CACHE_TTL/SITE_CONCURRENCY, SITES_PER_SEARCH. 473 passed. Обе в `~/avia-scale/dev` (worktree), от `scale-audit`.
 - 20:45 матрица A (patience 4 ч) готова: `python3 loadtest/table.py 'loadtest/results/A_*.json'`. 10/2 p50 5 мин; 50/4 p50 20 мин p95 37 мин; 100/8 p50 37 мин p95 71 мин; 50/16 всё ещё p50 15 мин → потолок guard, телефоны не помогают.
 - 20:48 запущены B и C (сутки, users 10/50/100 × phones 2/4) параллельно: `JOBS=6 loadtest/par.sh "B C" "10 50 100" "2 4"` → `loadtest/results/matrix_BC.txt` и `B_*.json`, `C_*.json`. B u10p2 ≈ 5 мин реального времени.
+- 20:50–21:13 фаза 4 закоммичена (`04_tech_debt.md`), IP сервера убран из отчётов (DECISIONS #15). Ветки фазы 6 в `~/avia-scale/dev` (все от `scale-audit`, тесты зелёные):
+  `scale-audit-telegram` 4b351e3 · `scale-audit-queue` 464153e · `scale-audit-dialog` 6809085 (P0 застревание в SEARCHING, затирание сессии, возврат лимита, put до send, _spawn + graceful shutdown) · `scale-audit-phones` fe9948d (PHONE_MAP, RETRY_OTHER_PHONE) · `scale-audit-health` 2ff782e (/status, HEALTH_ALERTS, строка лога на поиск) · `scale-audit-docs` d297001 (README, .env.example + тест, sites.yaml, config.py, капча без recon).
+- 21:00–21:12 серия на деградацию: 6×kupibilet@realme 5,2–6,3 с, 6×tutu@redmi 9,8–12 с, деградации нет, 0 капч, realme +0,9 °C, экран realme остался включён. Добор: aviasales@redmi 2/2 успешно (теперь 3/5), ozon@realme 1/2 (теперь 1/4). Мок переведён на профиль v2 (DECISIONS #16). 02_droidhub.md закрыт.
+- Результаты MCP fetch_page > лимита сами сохраняются в `~/.claude/projects/.../tool-results/`, разбор: `tools/ing2.sh TS_A SITE PHONE TS_B SITE PHONE`.
+- Дальше: ветка `scale-audit-deploy` (Dockerfile, compose), интеграция `scale-audit-all`, прогоны «до/после» на v2 (`--phone-map optimal`, флаги из .env), таблица B/C, 05_roadmap + ADR, 06_changes, 00_SUMMARY.
