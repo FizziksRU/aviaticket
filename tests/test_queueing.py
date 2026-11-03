@@ -212,7 +212,7 @@ async def test_scheduler_search_yields_to_people_when_priority_enabled(monkeypat
     order: list[str] = []
 
     async def fake_search(q, settings):
-        order.append(q)
+        order.append("subscription")
         return []
 
     monkeypatch.setattr(bot_mod, "search", fake_search)
@@ -230,7 +230,11 @@ async def test_scheduler_search_yields_to_people_when_priority_enabled(monkeypat
 
     h = asyncio.create_task(holder())
     await asyncio.sleep(0)
-    sub = asyncio.create_task(bot._scheduler_search("subscription"))
+    from datetime import date
+
+    from avia.models import Query
+
+    sub = asyncio.create_task(bot._scheduler_search(Query("MOW", "LED", date(2026, 12, 1))))
     await asyncio.sleep(0)
     user = asyncio.create_task(person())
     await asyncio.sleep(0)
