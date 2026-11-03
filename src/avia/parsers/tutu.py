@@ -487,7 +487,8 @@ def results_complete(snapshot: Snapshot | None) -> bool:
     """Проверяет полноту результатов поиска Туту по снимку сетевых ответов.
 
     Выдача считается полной (True), если среди ответов '/avia/offers/v2' есть хотя бы два,
-    или один с offersCurrentAmount >= 20. Иначе False.
+    или один с offersCurrentAmount >= 20, или один, где offersCurrentAmount равен offersTotalAmount
+    (показано всё, что нашлось). Иначе False.
     """
     if not snapshot or not snapshot.json_payloads:
         return False
@@ -516,6 +517,13 @@ def results_complete(snapshot: Snapshot | None) -> bool:
         if isinstance(summary, dict):
             raw_amt = summary.get("offersCurrentAmount")
             if isinstance(raw_amt, (int, float)) and not isinstance(raw_amt, bool) and raw_amt >= 20:
+                return True
+            raw_total = summary.get("offersTotalAmount")
+            if (
+                isinstance(raw_amt, (int, float)) and not isinstance(raw_amt, bool)
+                and isinstance(raw_total, (int, float)) and not isinstance(raw_total, bool)
+                and raw_amt > 0 and raw_amt == raw_total
+            ):
                 return True
 
     return v2_count >= 2

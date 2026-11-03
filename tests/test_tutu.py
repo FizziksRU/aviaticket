@@ -315,3 +315,17 @@ def test_broken_offers_and_variants_skipped():
     # Все 4 исходных валидных предложения остались, битые отброшены
     assert len(offers) == 4
     assert [o.price for o in offers] == [18754, 18991, 19423, 23240]
+
+
+def test_results_complete_when_current_equals_total():
+    import json as _json
+    from avia.collector import Snapshot
+    from avia.parsers.tutu import results_complete
+
+    def snap(cur, total):
+        body = _json.dumps({"summary": {"offersCurrentAmount": cur, "offersTotalAmount": total}})
+        return Snapshot(url="u", text="", json_payloads=[("https://x/avia/offers/v2", body)])
+
+    assert results_complete(snap(15, 15)) is True
+    assert results_complete(snap(8, 15)) is False
+    assert results_complete(snap(0, 0)) is False
