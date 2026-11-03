@@ -1,0 +1,7 @@
+ts_utc	kind	device	site	route	note
+2026-11-03T19:57:21Z	desktop_playwright	-	aviasales	MOW-LED-2026-11-20	phase1 cli check
+2026-11-03T19:57:21Z	desktop_playwright	-	kupibilet	MOW-LED-2026-11-20	phase1 cli check
+2026-11-03T19:57:21Z	desktop_playwright	-	tutu	MOW-LED-2026-11-20	phase1 cli check
+2026-11-03T19:57:21Z	desktop_playwright	-	yandex_travel	MOW-LED-2026-11-20	phase1 cli check
+2026-11-03T19:57:21Z	desktop_playwright	-	onetwotrip	MOW-LED-2026-11-20	phase1 cli check
+2026-11-03T19:57:21Z	desktop_playwright	-	ozon_travel	MOW-LED-2026-11-20	phase1 cli check
