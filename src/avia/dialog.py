@@ -75,6 +75,7 @@ class SearchRequest:
     query: Query
     baggage_mode: str = "any"
     criteria: SearchCriteria = field(default_factory=SearchCriteria)
+    dialog_id: str | None = None  # диалог, из которого запущен поиск: чужую сессию не трогаем
 
 
 @dataclass
@@ -157,6 +158,20 @@ class Dialog:
                 [("ℹ️ Помощь", "menu:help")],
             ],
         )
+
+    def search_finished(self, chat_id: int | str, dialog_id: str | None) -> Session | None:
+        """Выводит сессию из SEARCHING после поиска, отказа или ошибки.
+
+        Возвращает сессию, если она всё ещё принадлежит этому поиску; если человек
+        за время поиска начал новый диалог, его сессию не трогаем и возвращаем None.
+        dialog_id=None (запрос без привязки к диалогу) относится к текущей сессии.
+        """
+        session = self.sessions.get(chat_id)
+        if session is None or (dialog_id is not None and session.dialog_id != dialog_id):
+            return None
+        if session.step == Step.SEARCHING:
+            session.step = Step.DONE
+        return session
 
     def _start_search(self, chat_id: int | str) -> Reply:
         session = Session(step=Step.ORIGIN, dialog_id=secrets.token_hex(2))
@@ -719,6 +734,7 @@ class Dialog:
                     query=q,
                     baggage_mode=session.baggage_mode,
                     criteria=session.criteria,
+                    dialog_id=session.dialog_id,
                 )
             ]
 
@@ -737,6 +753,7 @@ class Dialog:
                     query=q,
                     baggage_mode=session.baggage_mode,
                     criteria=session.criteria,
+                    dialog_id=session.dialog_id,
                 )
             ]
 
@@ -875,15 +892,16 @@ class Dialog:
             args = text.removeprefix("/price").strip()
             try:
                 q = parse_query(args, today=self.today())
+                d_id = secrets.token_hex(2)
                 self.sessions[chat_id] = Session(
                     step=Step.SEARCHING,
                     origin=q.origin,
                     destination=q.destination,
                     depart=q.depart,
                     adults=q.adults,
-                    dialog_id=secrets.token_hex(2),
+                    dialog_id=d_id,
                 )
-                return [SearchRequest(query=q, baggage_mode="any")]
+                return [SearchRequest(query=q, baggage_mode="any", dialog_id=d_id)]
             except ParseError as e:
                 return [Reply(text=f"⚠️ {escape(str(e))}")]
 

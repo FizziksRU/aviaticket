@@ -104,6 +104,17 @@ class UserStore:
             )
         return True
 
+    def refund_search(self, tg_id: int, now: float | None = None) -> None:
+        """Возвращает поиск, засчитанный сегодня try_use_search, если он не дал результата."""
+        ts = time.time() if now is None else now
+        day = datetime.fromtimestamp(ts).strftime("%Y-%m-%d")
+        with self._connect() as db:
+            db.execute(
+                "UPDATE users SET search_count = search_count - 1, total_searches = MAX(total_searches - 1, 0) "
+                "WHERE tg_id = ? AND search_day = ? AND search_count > 0",
+                (int(tg_id), day),
+            )
+
     def stats(self, today: str | None = None) -> dict[str, int]:
         """Сводка для администратора: людей всего, активных сегодня, заблокированных, поисков всего."""
         day = today or datetime.now().strftime("%Y-%m-%d")

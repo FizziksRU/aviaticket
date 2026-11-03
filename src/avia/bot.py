@@ -2,9 +2,12 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Coroutine
 from html import escape
 import logging
 import secrets
+import signal
+from typing import Any
 
 import httpx
 
@@ -32,6 +35,10 @@ from .users import UserStore
 
 log = logging.getLogger("avia.bot")
 API = "https://api.telegram.org/bot{token}/{method}"
+# сколько ждать идущие поиски и ответы при остановке, прежде чем отменить их
+SHUTDOWN_GRACE_SECONDS = 30.0
+SEARCH_AGAIN_KB = [[("🔎 Найти билет", "menu:go")]]
+LIMIT_KB = [[("🔔 Мои отслеживания", "menu:track")]]
 
 
 class Bot:
@@ -48,6 +55,8 @@ class Bot:
         self.s = settings
         self.http = httpx.AsyncClient(timeout=70)
         self.busy: set[int] = set()
+        self._tasks: set[asyncio.Task] = set()
+        self._scheduler_task: asyncio.Task | None = None
         self.users = UserStore(settings.storage_dir / "users.sqlite")
         self._search_sem = asyncio.Semaphore(settings.max_parallel_searches)
         self.history = PriceHistory(settings.storage_dir / "history.sqlite")
@@ -139,22 +148,24 @@ class Bot:
 
     async def _run_search(self, chat_id: int, req: SearchRequest):
         if chat_id in self.busy:
+            self.dialog.search_finished(chat_id, req.dialog_id)
             await self.send(chat_id, "Предыдущий поиск ещё идёт, подождите.")
             return
-        if (
-            chat_id not in self.s.tg_allowed_ids
-            and not self.users.try_use_search(chat_id, self.s.daily_search_limit)
-        ):
+        charged = chat_id not in self.s.tg_allowed_ids
+        if charged and not self.users.try_use_search(chat_id, self.s.daily_search_limit):
+            self.dialog.search_finished(chat_id, req.dialog_id)
             await self.send(
                 chat_id,
                 f"На сегодня лимит поисков исчерпан ({self.s.daily_search_limit}). Завтра можно снова; "
                 "отслеживания продолжают работать.",
+                reply_markup=to_reply_markup(LIMIT_KB),
             )
             return
         self.busy.add(chat_id)
         q = req.query
         baggage_mode = req.baggage_mode
         wait_msg_id = None
+        useful = False
         try:
             wait_msg = await self.send(
                 chat_id,
@@ -165,6 +176,7 @@ class Bot:
 
             async with self._search_sem:
                 results = await search(q, self.s)
+            useful = any(r.ok for r in results)
             results = assign_ids(results)
             try:
                 await asyncio.to_thread(self.history.annotate, q, results)
@@ -181,33 +193,13 @@ class Bot:
                 dropped_criteria=dropped_criteria,
             )
 
-            session = self.dialog.sessions.get(chat_id)
-            if session is None or not session.dialog_id:
-                session = Session(
-                    step=Step.DONE,
-                    origin=q.origin,
-                    destination=q.destination,
-                    depart=q.depart,
-                    return_date=q.return_date,
-                    adults=q.adults,
-                    baggage_mode=baggage_mode,
-                    criteria=req.criteria,
-                    dialog_id=secrets.token_hex(2),
-                )
-                self.dialog.sessions[chat_id] = session
-            else:
-                session.step = Step.DONE
-
-            d_id = session.dialog_id
+            d_id = self._session_after_search(chat_id, req)
             shown_ids = {o.offer_id for o in flat if o.offer_id}
             has_more = any(o.offer_id not in shown_ids for o in pool)
             kb = compact_keyboard(d_id, has_more=has_more)
             reply_markup = to_reply_markup(kb)
 
-            for i, chunk in enumerate(chunks):
-                rm = reply_markup if i == len(chunks) - 1 else None
-                await self.send(chat_id, chunk, reply_markup=rm)
-
+            # снимок сохраняем до отправки: если упадёт второй кусок, кнопки первого всё равно работают
             self.store.put(
                 chat_id,
                 q,
@@ -221,11 +213,24 @@ class Bot:
                 dropped_baggage=dropped_baggage,
                 dropped_criteria=dropped_criteria,
             )
+            for i, chunk in enumerate(chunks):
+                rm = reply_markup if i == len(chunks) - 1 else None
+                await self.send(chat_id, chunk, reply_markup=rm)
         except Exception as e:
             log.exception("search failed")
-            await self.send(chat_id, f"⚠️ {escape(friendly_error(e))}")
+            self.dialog.search_finished(chat_id, req.dialog_id)
+            try:
+                await self.send(chat_id, f"⚠️ {escape(friendly_error(e))}", reply_markup=to_reply_markup(SEARCH_AGAIN_KB))
+            except Exception:
+                log.exception("не удалось сообщить об ошибке поиска")
         finally:
             self.busy.discard(chat_id)
+            if charged and not useful:
+                # ни один сайт не ответил или поиск упал: попытку не засчитываем
+                try:
+                    self.users.refund_search(chat_id)
+                except Exception:
+                    log.exception("не удалось вернуть попытку поиска")
             if wait_msg_id is not None:
                 try:
                     await self.call("deleteMessage", chat_id=chat_id, message_id=wait_msg_id)
@@ -234,6 +239,32 @@ class Bot:
                         await self.call("editMessageText", chat_id=chat_id, message_id=wait_msg_id, text="Готово")
                     except Exception:
                         pass
+
+    def _session_after_search(self, chat_id: int, req: SearchRequest) -> str:
+        """Выводит сессию поиска в DONE и возвращает dialog_id для кнопок выдачи.
+
+        Если человек за время поиска начал новый диалог, его сессию не трогаем:
+        выдача уходит со своим dialog_id, и её кнопки ответят «устарели».
+        """
+        owned = self.dialog.search_finished(chat_id, req.dialog_id)
+        if owned is not None and owned.dialog_id:
+            return owned.dialog_id
+        if req.dialog_id and chat_id in self.dialog.sessions:
+            return req.dialog_id
+        q = req.query
+        session = Session(
+            step=Step.DONE,
+            origin=q.origin,
+            destination=q.destination,
+            depart=q.depart,
+            return_date=q.return_date,
+            adults=q.adults,
+            baggage_mode=req.baggage_mode,
+            criteria=req.criteria,
+            dialog_id=req.dialog_id or secrets.token_hex(2),
+        )
+        self.dialog.sessions[chat_id] = session
+        return session.dialog_id
 
     def _admit(self, user: dict, chat: dict | None) -> bool:
         """Пускает администраторов и (в открытом режиме) любого человека из личного чата; регистрирует в users."""
@@ -352,6 +383,12 @@ class Bot:
                 history=self.history,
             )
             self._scheduler_task = asyncio.create_task(scheduler.run_forever())
+        try:
+            await self._poll(offset)
+        finally:
+            await self.shutdown()
+
+    async def _poll(self, offset: int) -> None:
         while True:
             try:
                 updates = await self.call(
@@ -367,9 +404,35 @@ class Bot:
             for u in updates:
                 offset = u["update_id"] + 1
                 if "message" in u:
-                    asyncio.create_task(self.handle(u["message"]))
+                    self._spawn(self.handle(u["message"]))
                 elif "callback_query" in u:
-                    asyncio.create_task(self.handle_callback(u["callback_query"]))
+                    self._spawn(self.handle_callback(u["callback_query"]))
+
+    def _spawn(self, coro: Coroutine[Any, Any, Any]) -> asyncio.Task:
+        """Запускает обработчик апдейта, держит ссылку на задачу и логирует её падение."""
+        task = asyncio.create_task(coro)
+        self._tasks.add(task)
+        task.add_done_callback(self._task_done)
+        return task
+
+    def _task_done(self, task: asyncio.Task) -> None:
+        self._tasks.discard(task)
+        if not task.cancelled() and task.exception() is not None:
+            log.error("обработчик апдейта упал", exc_info=task.exception())
+
+    async def shutdown(self, grace: float = SHUTDOWN_GRACE_SECONDS) -> None:
+        """Останавливает планировщик, даёт идущим поискам до grace секунд, закрывает HTTP-клиент."""
+        if self._scheduler_task is not None:
+            self._scheduler_task.cancel()
+            await asyncio.gather(self._scheduler_task, return_exceptions=True)
+        pending = [t for t in self._tasks if not t.done()]
+        if pending:
+            log.info("остановка: жду %d задач до %.0f с", len(pending), grace)
+            _, still = await asyncio.wait(pending, timeout=grace)
+            for task in still:
+                task.cancel()
+            await asyncio.gather(*still, return_exceptions=True)
+        await self.http.aclose()
 
 
 def main():
@@ -377,7 +440,18 @@ def main():
     # httpx на уровне INFO пишет полный URL запроса, а в нём токен бота
     logging.getLogger("httpx").setLevel(logging.WARNING)
     logging.getLogger("httpcore").setLevel(logging.WARNING)
-    asyncio.run(Bot(load_settings()).run())
+    asyncio.run(_serve(Bot(load_settings())))
+
+
+async def _serve(bot: Bot) -> None:
+    # SIGTERM (systemd, docker stop) ведёт себя как Ctrl+C: отмена и аккуратная остановка
+    task = asyncio.current_task()
+    if task is not None:
+        try:
+            asyncio.get_running_loop().add_signal_handler(signal.SIGTERM, task.cancel)
+        except (NotImplementedError, RuntimeError):
+            pass
+    await bot.run()
 
 
 if __name__ == "__main__":
