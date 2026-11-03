@@ -50,8 +50,8 @@ class Settings:
     gemini_cmd: str = "gemini"
     gemini_model: str | None = None
     gemini_timeout: int = 180
-    ssh_host: str = ""            # например root@193.41.86.92
-    ssh_key: str = ""             # например ~/.ssh/aeza_pool
+    ssh_host: str = ""            # например user@host
+    ssh_key: str = ""             # например ~/.ssh/id_ed25519
     agy_account: str = "acc4"
     agy_proxy: str = ""           # http://127.0.0.1:3105, исходящий канал аккаунта на сервере
     agy_wrapper: str = "/opt/gemini-pool/bin/avia-llm"

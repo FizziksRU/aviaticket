@@ -38,7 +38,7 @@ from .subscriptions import SubscriptionStore
 
 MAX_SUBSCRIPTIONS = 1
 
-# сайты, умеющие «туда и обратно» (все пять сайтов); пустое множество включает заглушку «скоро»
+# сайты, умеющие «туда и обратно» (все шесть браузерных); пустое множество включает заглушку «скоро»
 ROUND_TRIP_SITES: frozenset[str] = frozenset({"aviasales", "kupibilet", "yandex_travel", "tutu", "onetwotrip", "ozon_travel"})
 
 HELP = (

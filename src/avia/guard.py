@@ -169,7 +169,7 @@ def friendly_error(exc: BaseException) -> str:
 
     # Сайт показал капчу или блокировку
     if "капч" in text or "блокировк" in text:
-        return "сайт показал капчу, владельцу нужно пройти её руками: python -m avia.recon <сайт> ... --show"
+        return "сайт показал капчу, попробуйте позже"
 
     # Таймаут ожидания ответа
     if isinstance(exc, (httpx.TimeoutException, asyncio.TimeoutError, TimeoutError)) or "таймаут" in text:

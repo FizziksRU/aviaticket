@@ -317,7 +317,7 @@ async def test_hashable_query_types(guard: SearchGuard):
 
 
 def test_friendly_error_cases():
-    captcha_msg = "сайт показал капчу, владельцу нужно пройти её руками: python -m avia.recon <сайт> ... --show"
+    captcha_msg = "сайт показал капчу, попробуйте позже"
 
     # Капча и блокировка
     assert friendly_error(RuntimeError("сайт показал капчу или блокировку")) == captcha_msg
