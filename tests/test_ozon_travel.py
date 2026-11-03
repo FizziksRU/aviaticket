@@ -343,3 +343,34 @@ def test_offer_id_stability_and_uniqueness():
 
     assert ids1 == ids2
     assert len(set(ids1)) == 30
+
+
+def test_carry_on_only_tariff():
+    offers = _rt_offers()
+    with_carry = [o for o in offers if o.carry_on]
+    assert with_carry and all(o.carry_on == "ручная кладь есть" and o.baggage == "без багажа" for o in with_carry)
+
+
+def test_criteria_filters_work_on_ozon_round_trip():
+    from avia.criteria import SearchCriteria
+    from avia.filters import apply_criteria
+    from avia.models import SiteResult
+    from avia.offers import filter_by_baggage
+
+    offers = _rt_offers()
+    res = [SiteResult(site="ozon_travel", ok=True, offers=offers)]
+
+    direct, dropped = apply_criteria(res, SearchCriteria(max_transfers=0))
+    assert direct[0].offers == [] and dropped == len(offers)
+
+    short, _ = apply_criteria(res, SearchCriteria(max_duration_hours=10))
+    assert short[0].offers
+    assert all(o.back.duration != "18ч 30м" and o.duration != "20ч 25м" for o in short[0].offers)
+
+    morning, _ = apply_criteria(res, SearchCriteria(depart_parts=frozenset({"morning"})))
+    assert morning[0].offers and all(o.depart_time < "12:00" for o in morning[0].offers)
+
+    with_bag, _ = filter_by_baggage(res, "with")
+    assert with_bag[0].offers == []
+    without, _ = filter_by_baggage(res, "without")
+    assert len(without[0].offers) == len(offers)

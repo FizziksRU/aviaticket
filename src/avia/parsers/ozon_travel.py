@@ -154,6 +154,16 @@ def _split_flight_numbers(numbers: list[str] | None, first_count: int) -> tuple[
     return there or None, back or None
 
 
+def _parse_carry_on(luggage_obj: Any) -> str | None:
+    """Ручная кладь: явно указана только в тарифах без багажа ('Ручная кладь 7 кг')."""
+    if not isinstance(luggage_obj, dict):
+        return None
+    text = str(luggage_obj.get("text") or "").replace("\xa0", " ").replace("\u2009", " ").lower()
+    if "ручная кладь" in text:
+        return "ручная кладь есть"
+    return None
+
+
 def results_complete(snapshot: Snapshot | None) -> bool:
     """Проверяет полноту результатов поиска Озон Тревел по снимку сетевых ответов.
 
@@ -323,6 +333,7 @@ def parse_ozon_travel(snapshot: Snapshot, query: Query) -> list[Offer]:
                 duration=there["duration"],
                 transfers=there["transfers"],
                 baggage=baggage,
+                carry_on=_parse_carry_on(luggage_obj),
                 url=offer_url,
                 flight_numbers=flight_numbers,
                 layovers=there["layovers"],
