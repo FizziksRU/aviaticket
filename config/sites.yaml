@@ -10,7 +10,7 @@
 # Коды городов IATA (MOW, ALA, TAS, MSQ, EVN ...).
 
 sites:
-  # Работает сразу после получения токена (TP_TOKEN в .env). Это кэш поисков Aviasales
+  # Выключен (enabled: false). Нужен TP_TOKEN в .env. Это кэш поисков Aviasales
   # за последние ~48 часов, не живая цена. Цена за одного пассажира умножается на число пассажиров.
   - name: aviasales_cache
     source: api
@@ -47,7 +47,8 @@ sites:
     settle_ms: 15000
     scrolls: 2
 
-  # Заглушки: шаблон URL нужно снять руками с реальной выдачи, потом recon и парсер.
+  # Туту и Яндекс: рабочие, с парсерами. id городов: tutu — через подсказки сайта (id_resolver: tutu),
+  # yandex — по таблице src/avia/yandex_ids.py.
   - name: tutu
     source: browser
     parser: tutu
@@ -82,7 +83,7 @@ sites:
     scrolls: 1
 
   # OneTwoTrip: шаблоны сняты с ссылки пользователя (дата туда ddmm, города, дата обратно ddmm; пассажиры в p=взр_дети_младенцы).
-  # Выключен, пока нет парсера (сначала recon).
+  # Включён, парсер onetwotrip. На телефоне redmi в замерах не отвечал (docs/audit/02_droidhub.md).
   - name: onetwotrip
     source: browser
     parser: onetwotrip
@@ -96,7 +97,8 @@ sites:
     scrolls: 2
 
   # Озон Тревел: шаблоны сняты со ссылки пользователя (route = туда+обратно кодами в нижнем регистре).
-  # Выключен: антибот Озона отдаёт заглушку автоматическому браузеру (сначала recon в видимом окне).
+  # Включён. Desktop-Playwright получает заглушку антибота, через телефон работает
+  # (замер: redmi 3/3, realme 0/2 — см. docs/audit/02_droidhub.md, PHONE_MAP в .env.example).
   - name: ozon_travel
     source: browser
     parser: ozon_travel

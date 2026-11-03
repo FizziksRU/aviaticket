@@ -122,7 +122,7 @@ async def test_pipeline_error_isolation(monkeypatch):
         (ConnectionResetError("peer reset"), "нет сети"),
         (asyncio.TimeoutError(), "таймаут"),
         (httpx.ReadTimeout("read timeout"), "таймаут"),
-        (RuntimeError("сайт показал капчу или блокировку"), "сайт показал капчу, владельцу нужно пройти её руками: python -m avia.recon <сайт> ... --show"),
+        (RuntimeError("сайт показал капчу или блокировку"), "сайт показал капчу, попробуйте позже"),
         (ValueError("sensitive_internal_token_secret"), "неизвестная ошибка (ValueError)"),
     ],
 )
