@@ -103,3 +103,20 @@ class UserStore:
                 (day, count + 1, int(tg_id)),
             )
         return True
+
+    def stats(self, today: str | None = None) -> dict[str, int]:
+        """Сводка для администратора: людей всего, активных сегодня, заблокированных, поисков всего."""
+        day = today or datetime.now().strftime("%Y-%m-%d")
+        with self._connect() as db:
+            row = db.execute(
+                "SELECT COUNT(*) AS n, COALESCE(SUM(blocked), 0) AS b, COALESCE(SUM(total_searches), 0) AS s, "
+                "COALESCE(SUM(CASE WHEN search_day = ? THEN search_count ELSE 0 END), 0) AS today "
+                "FROM users",
+                (day,),
+            ).fetchone()
+        return {"users": int(row["n"]), "blocked": int(row["b"]), "searches": int(row["s"]), "today": int(row["today"])}
+
+    def recent(self, limit: int = 10) -> list[User]:
+        with self._connect() as db:
+            rows = db.execute("SELECT * FROM users ORDER BY last_seen_at DESC LIMIT ?", (int(limit),)).fetchall()
+        return [self._row(r) for r in rows]

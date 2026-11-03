@@ -62,7 +62,7 @@ class Settings:
     tg_token: str = ""
     tg_allowed_ids: set[int] = field(default_factory=set)   # администраторы; без лимитов поисков
     tg_open: bool = False          # True: бот отвечает всем, пользователи регистрируются в users.sqlite
-    daily_search_limit: int = 30   # поисков в сутки на человека (0 = без лимита)
+    daily_search_limit: int = 40   # поисков в сутки на человека (0 = без лимита)
     max_parallel_searches: int = 2  # одновременных поисков во всём боте (телефоны одни на всех)
 
 
@@ -103,6 +103,6 @@ def load_settings(path: Path | None = None) -> Settings:
         tg_token=os.getenv("TG_BOT_TOKEN", ""),
         tg_allowed_ids=allowed,
         tg_open=os.getenv("TG_OPEN", "0") == "1",
-        daily_search_limit=int(os.getenv("DAILY_SEARCH_LIMIT", "30")),
+        daily_search_limit=int(os.getenv("DAILY_SEARCH_LIMIT", "40")),
         max_parallel_searches=max(1, int(os.getenv("MAX_PARALLEL_SEARCHES", "2"))),
     )

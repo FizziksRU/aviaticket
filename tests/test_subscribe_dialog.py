@@ -114,32 +114,32 @@ def test_subscribe_with_filters_formatting(dialog, store, subs):
     assert "фильтры: с багажом, пересадки: только прямые" in rep.text
 
 
-def test_subscribe_limit_10(dialog, store, subs):
-    """Лимит 10 активных подписок: блокировка новой и пропуск существующей."""
+def test_subscribe_limit(dialog, store, subs):
+    """Лимит активных подписок (MAX_SUBSCRIPTIONS): блокировка новой и пропуск существующей."""
+    from avia.dialog import MAX_SUBSCRIPTIONS
+
     chat_id = 104
-    # Создаём 10 подписок
-    for i in range(10):
+    for i in range(MAX_SUBSCRIPTIONS):
         q = Query(origin="MOW", destination="LED", depart=date(2026, 12, 1 + i))
         subs.create(chat_id, q, "any", SearchCriteria())
 
-    assert subs.count_active(chat_id) == 10
+    assert subs.count_active(chat_id) == MAX_SUBSCRIPTIONS
 
-    # Попытка создать 11-ю (новый маршрут)
     q_new = Query(origin="KUF", destination="AER", depart=date(2026, 12, 25))
     o = Offer(site="s1", price=5000, currency="RUB")
     store.put(chat_id, q_new, [SiteResult("s1", True, [o])], "any", [o])
 
     rep_limit = dialog.on_callback(chat_id, "track:d_lim")[0]
-    assert "Достигнут лимит 10 отслеживаний, отпишитесь от ненужного" in rep_limit.text
+    assert f"Достигнут лимит отслеживаний ({MAX_SUBSCRIPTIONS})" in rep_limit.text
     assert rep_limit.keyboard == [[("🔔 Мои отслеживания", "menu:track")]]
-    assert subs.count_active(chat_id) == 10
+    assert subs.count_active(chat_id) == MAX_SUBSCRIPTIONS
 
-    # Повтор одной из уже существующих при 10 активных — разрешён
+    # Повтор уже существующей подписки при полном лимите — разрешён
     q_existing = Query(origin="MOW", destination="LED", depart=date(2026, 12, 1))
     store.put(chat_id, q_existing, [SiteResult("s1", True, [o])], "any", [o])
     rep_dup = dialog.on_callback(chat_id, "track:d_dup")[0]
     assert "Вы уже следите за этим маршрутом." in rep_dup.text
-    assert subs.count_active(chat_id) == 10
+    assert subs.count_active(chat_id) == MAX_SUBSCRIPTIONS
 
 
 def test_subscriptions_unavailable_when_subs_is_none():

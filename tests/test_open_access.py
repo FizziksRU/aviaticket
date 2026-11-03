@@ -74,3 +74,41 @@ def test_subscriptions_are_per_user(tmp_path):
     assert st.count_active(100) == 1 and st.count_active(200) == 0
     assert not st.deactivate(sub.id, 200)
     assert st.deactivate(sub.id, 100)
+
+
+def sent_texts(bot):
+    return [p.get("text", "") for m, p in bot.calls if m == "sendMessage"]
+
+
+@pytest.mark.asyncio
+async def test_admin_block_unblock_stats():
+    bot = make_bot()
+    await bot.handle(msg(555))
+    bot.calls.clear()
+    await bot.handle(msg(1, "/block 555"))
+    assert bot.users.get(555).blocked
+    bot.calls.clear()
+    await bot.handle(msg(555))
+    assert not bot.calls
+    await bot.handle(msg(1, "/unblock 555"))
+    assert not bot.users.get(555).blocked
+    bot.calls.clear()
+    await bot.handle(msg(1, "/stats"))
+    assert "Людей: 2" in sent_texts(bot)[0] and "555" in sent_texts(bot)[0]
+
+
+@pytest.mark.asyncio
+async def test_admin_commands_closed_to_others():
+    bot = make_bot()
+    await bot.handle(msg(555))
+    bot.calls.clear()
+    await bot.handle(msg(555, "/block 1"))
+    await bot.handle(msg(555, "/stats"))
+    assert not bot.calls
+
+
+@pytest.mark.asyncio
+async def test_cannot_block_admin():
+    bot = make_bot()
+    await bot.handle(msg(1, "/block 1"))
+    assert "нельзя" in sent_texts(bot)[0] and not bot.users.get(1).blocked

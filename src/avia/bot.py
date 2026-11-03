@@ -259,8 +259,44 @@ class Bot:
         if not self._admit(msg.get("from", {}), msg.get("chat")):
             return
         text = (msg.get("text") or "").strip()
+        if text.startswith(("/stats", "/block", "/unblock")):
+            if msg.get("from", {}).get("id") in self.s.tg_allowed_ids:
+                await self._admin_command(chat_id, text)
+            return
         actions = self.dialog.on_text(chat_id, text)
         await self._process_actions(chat_id, actions)
+
+    async def _admin_command(self, chat_id: int, text: str) -> None:
+        """/stats — сводка и последние люди; /block <id>, /unblock <id> — закрыть или вернуть доступ."""
+        cmd, _, arg = text.partition(" ")
+        cmd = cmd.split("@")[0]
+        if cmd == "/stats":
+            st = self.users.stats()
+            lines = [
+                f"Людей: {st['users']} (заблокировано {st['blocked']})",
+                f"Поисков сегодня: {st['today']}, всего: {st['searches']}",
+                "",
+                "Последние:",
+            ]
+            for u in self.users.recent(10):
+                name = f"@{u.username}" if u.username else (u.first_name or "—")
+                mark = " 🚫" if u.blocked else ""
+                lines.append(f"{u.tg_id} {escape(name)} · поисков {u.total_searches}{mark}")
+            await self.send(chat_id, "\n".join(lines))
+            return
+        arg = arg.strip()
+        if not arg.lstrip("-").isdigit():
+            await self.send(chat_id, f"Формат: {cmd} <tg id>")
+            return
+        target = int(arg)
+        if target in self.s.tg_allowed_ids:
+            await self.send(chat_id, "Администратора заблокировать нельзя.")
+            return
+        ok = self.users.set_blocked(target, cmd == "/block")
+        if not ok:
+            await self.send(chat_id, "Такого пользователя нет в базе.")
+        else:
+            await self.send(chat_id, f"{target}: {'заблокирован' if cmd == '/block' else 'разблокирован'}")
 
     async def handle_callback(self, cq: dict):
         user_id = cq.get("from", {}).get("id")

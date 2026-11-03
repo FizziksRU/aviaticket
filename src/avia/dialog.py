@@ -36,7 +36,7 @@ from .parsing import (
 from .store import ResultStore, SearchSnapshot
 from .subscriptions import SubscriptionStore
 
-MAX_SUBSCRIPTIONS = 10
+MAX_SUBSCRIPTIONS = 1
 
 # сайты, умеющие «туда и обратно» (все пять сайтов); пустое множество включает заглушку «скоро»
 ROUND_TRIP_SITES: frozenset[str] = frozenset({"aviasales", "kupibilet", "yandex_travel", "tutu", "onetwotrip", "ozon_travel"})
@@ -528,7 +528,7 @@ class Dialog:
         if existing is None and len(active_subs) >= MAX_SUBSCRIPTIONS:
             return [
                 Reply(
-                    text="Достигнут лимит 10 отслеживаний, отпишитесь от ненужного",
+                    text=f"Достигнут лимит отслеживаний ({MAX_SUBSCRIPTIONS}), отпишитесь от ненужного",
                     keyboard=[[("🔔 Мои отслеживания", "menu:track")]],
                 )
             ]
