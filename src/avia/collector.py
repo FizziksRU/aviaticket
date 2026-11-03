@@ -72,6 +72,7 @@ class Snapshot:
     text: str
     json_payloads: list[tuple[str, str]] = field(default_factory=list)
     blocked: bool = False
+    device: str | None = None  # телефон droidhub, с которого снят снимок (None — desktop)
 
 
 def is_blocked(text: str) -> bool:

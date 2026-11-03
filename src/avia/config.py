@@ -72,6 +72,24 @@ class Settings:
     sites_per_search: int = 2       # сайтов одновременно внутри одного поиска
     search_priority: bool = False   # True: поиски людей впереди фонового опроса подписок
     queue_notice: bool = False      # True: писать человеку «вы N-й в очереди, примерно M мин»
+    # PHONE_MAP: сайт → телефоны поверх phone из sites.yaml («ozon_travel=redmi;aviasales=realme»)
+    phone_map: dict[str, list[str]] = field(default_factory=dict)
+    retry_other_phone: bool = False  # RETRY_OTHER_PHONE=1: повтор пустой выдачи на другом телефоне
+
+
+def parse_phone_map(raw: str) -> dict[str, list[str]]:
+    """«site=phone[,phone];site2=phone» → {site: [phone, ...]}; ошибка формата — ValueError."""
+    result: dict[str, list[str]] = {}
+    for part in raw.split(";"):
+        part = part.strip()
+        if not part:
+            continue
+        site, sep, phones = part.partition("=")
+        devices = [d.strip() for d in phones.split(",") if d.strip()]
+        if not sep or not site.strip() or not devices:
+            raise ValueError(f"PHONE_MAP: ожидается «сайт=телефон[,телефон]», получено «{part}»")
+        result[site.strip()] = devices
+    return result
 
 
 def load_settings(path: Path | None = None) -> Settings:
@@ -120,4 +138,6 @@ def load_settings(path: Path | None = None) -> Settings:
         sites_per_search=max(1, int(os.getenv("SITES_PER_SEARCH", "2"))),
         search_priority=os.getenv("SEARCH_PRIORITY", "0") == "1",
         queue_notice=os.getenv("QUEUE_NOTICE", "0") == "1",
+        phone_map=parse_phone_map(os.getenv("PHONE_MAP", "")),
+        retry_other_phone=os.getenv("RETRY_OTHER_PHONE", "0") == "1",
     )

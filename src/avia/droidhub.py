@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from dataclasses import replace
 import logging
 from typing import Any
 
@@ -81,7 +82,11 @@ def candidates(settings: Settings, site: SiteConfig) -> list[str]:
     """Возвращает список идентификаторов устройств для сайта.
 
     Для 'auto' возвращает список устройств из настроек, иначе [site.phone].
+    PHONE_MAP (settings.phone_map) переопределяет phone из sites.yaml.
     """
+    mapped = (getattr(settings, "phone_map", None) or {}).get(site.name)
+    if mapped:
+        return list(mapped)
     phone = (getattr(site, "phone", None) or "").strip()
     if phone == "auto":
         devs = getattr(settings, "droidhub_devices", None) or []
@@ -94,13 +99,29 @@ def phone_enabled(settings: Settings, site: SiteConfig) -> bool:
     (site.phone != 'auto' или settings.droidhub_devices непустой).
     """
     phone = (getattr(site, "phone", None) or "").strip()
+    if (getattr(settings, "phone_map", None) or {}).get(site.name):
+        phone = "mapped"
     url = (getattr(settings, "droidhub_url", None) or "").strip()
     token = (getattr(settings, "droidhub_token", None) or "").strip()
     if not (phone and url and token):
         return False
-    if phone == "auto":
+    if phone in ("auto", "mapped"):
         return bool(candidates(settings, site))
     return True
+
+
+def retry_candidates(settings: Settings, site: SiteConfig, failed_device: str | None) -> list[str]:
+    """Телефоны для повтора пустой выдачи: при RETRY_OTHER_PHONE любой из пула, кроме failed_device.
+
+    Выдача зависит от пары «сайт × телефон», поэтому повтор на том же телефоне часто снова пуст.
+    Если других телефонов нет или режим выключен, возвращает обычных кандидатов сайта.
+    """
+    base = candidates(settings, site)
+    if not getattr(settings, "retry_other_phone", False) or not failed_device:
+        return base
+    pool = base + [d for d in (getattr(settings, "droidhub_devices", None) or []) if d not in base]
+    others = [d for d in pool if d != failed_device]
+    return others or base
 
 
 async def acquire(candidates: list[str]) -> str:
@@ -311,7 +332,7 @@ async def fetch_page_snapshot_any(
                 wait_for=wait_for,
                 client=client,
             )
-            return snap, finished
+            return replace(snap, device=dev), finished
         except Exception as exc:
             last_exc = exc
             if not _is_retryable_error(exc):
