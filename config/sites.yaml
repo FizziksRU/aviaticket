@@ -105,5 +105,6 @@ sites:
     phone_wait_seconds: 30
     phone_capture_json: ["aviaSearchResult"]
     url_template: "https://www.ozon.ru/travel/flight/search?Children=0&Dlts={adults}&Infants=0&ServiceClass=ECONOMY&dates=d{date_iso}&route={origin}{destination}"
+    url_template_rt: "https://www.ozon.ru/travel/flight/search?Children=0&Dlts={adults}&Infants=0&ServiceClass=ECONOMY&dates=d{date_iso}d{date_iso_ret}&route={origin}{destination}{destination}{origin}"
     settle_ms: 30000
     scrolls: 1

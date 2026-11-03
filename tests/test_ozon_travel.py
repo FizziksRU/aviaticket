@@ -201,11 +201,55 @@ def test_async_error_without_flights_returns_empty_list():
     assert parse_ozon_travel(snap_no_flights, _q()) == []
 
 
-def test_return_date_returns_empty_list():
-    """Для запроса туда-обратно (query.return_date) парсер пока возвращает []."""
-    snap = make_snapshot()
-    q_round = _q(return_date=date(2026, 12, 10))
-    assert parse_ozon_travel(snap, q_round) == []
+RT_JSON = (FIXTURES_DIR / "search_rt_kuf_evn_0112_0812_widget.json").read_text(encoding="utf-8")
+
+
+def _rt_offers():
+    snap = make_snapshot([(WIDGET_URL, RT_JSON)])
+    return parse_ozon_travel(snap, _q(return_date=date(2026, 12, 8)))
+
+
+def test_round_trip_offers_have_back_leg():
+    offers = _rt_offers()
+    assert offers
+    assert all(o.back is not None for o in offers)
+    assert offers == sorted(offers, key=lambda o: o.price)
+    assert offers[0].price == 24989
+
+
+def test_round_trip_back_leg_fields():
+    o = next(x for x in _rt_offers() if x.depart_time == "17:35" and x.back.depart_time == "11:00" and x.arrive_time == "14:00")
+    assert o.depart_at == "2026-12-01T17:35"
+    assert o.arrive_at == "2026-12-02T14:00"
+    assert o.back.depart_at == "2026-12-08T11:00"
+    assert o.back.arrive_at == "2026-12-09T05:30"
+    assert o.back.duration == "18ч 30м"
+    assert o.back.transfers == 1
+    assert o.back.layovers and o.back.layovers[0].startswith("Минеральные Воды")
+    assert o.flight_numbers == ["DP6582", "SU1866"]
+    assert o.back.flight_numbers == ["A46030", "A46307"]
+
+
+def test_round_trip_back_without_day_shift():
+    o = next(x for x in _rt_offers() if x.back.depart_time == "06:20" and x.back.arrive_time == "20:05")
+    assert o.back.depart_at[:10] == o.back.arrive_at[:10] == "2026-12-08"
+
+
+def test_round_trip_offer_ids_differ_by_back_leg():
+    ids = [o.offer_id for o in _rt_offers()]
+    assert len(ids) == len(set(ids))
+
+
+def test_round_trip_without_back_block_skipped():
+    data = json.loads(RT_JSON)
+    for card in data["state"]["flights"]:
+        card.pop("wayBackDetails", None)
+    snap = make_snapshot([(WIDGET_URL, json.dumps(data))])
+    assert parse_ozon_travel(snap, _q(return_date=date(2026, 12, 8))) == []
+
+
+def test_oneway_has_no_back_leg():
+    assert all(o.back is None for o in parse_ozon_travel(make_snapshot(), _q()))
 
 
 def test_select_best_payload_among_multiple():

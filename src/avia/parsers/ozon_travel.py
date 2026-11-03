@@ -9,7 +9,7 @@ from typing import Any
 import urllib.parse
 
 from ..collector import Snapshot
-from ..models import Offer, Query
+from ..models import Leg, Offer, Query
 from ..offers import compute_offer_id
 from . import register_parser
 from .travelpayouts import format_duration
@@ -103,6 +103,57 @@ def _parse_baggage(luggage_obj: Any) -> str | None:
     return None
 
 
+def _parse_leg(details: Any, base_date: Any) -> dict[str, Any]:
+    """Разбирает блок одного направления (wayThereDetails / wayBackDetails)."""
+    if not isinstance(details, dict):
+        details = {}
+
+    time_obj = details.get("tripTime")
+    time_text = time_obj.get("text", "") if isinstance(time_obj, dict) else ""
+    dep_time = arr_time = None
+    if time_text:
+        parts = re.split(r"\s*[-–—]\s*", time_text.strip())
+        if len(parts) >= 2:
+            dep_time, arr_time = parts[0].strip(), parts[1].strip()
+        elif ":" in parts[0]:
+            dep_time = parts[0].strip()
+
+    days_offset = 0
+    tdiff_obj = details.get("timeDifference")
+    if isinstance(tdiff_obj, dict):
+        m = re.search(r"[+-]?\d+", (tdiff_obj.get("text") or "").translate(SUPERSCRIPT_TRANS))
+        if m:
+            days_offset = int(m.group(0))
+
+    dep_at = arr_at = None
+    if base_date is not None:
+        if dep_time:
+            dep_at = f"{base_date.isoformat()}T{dep_time}"
+        if arr_time:
+            arr_at = f"{(base_date + timedelta(days=days_offset)).isoformat()}T{arr_time}"
+
+    dur_obj = details.get("tripDuration")
+    duration = _parse_duration(dur_obj.get("text") if isinstance(dur_obj, dict) else None)
+    transfers, layovers = _parse_transfers_and_layovers(details.get("transfers"))
+    return {
+        "depart_time": dep_time,
+        "arrive_time": arr_time,
+        "depart_at": dep_at,
+        "arrive_at": arr_at,
+        "duration": duration,
+        "transfers": transfers,
+        "layovers": layovers,
+    }
+
+
+def _split_flight_numbers(numbers: list[str] | None, first_count: int) -> tuple[list[str] | None, list[str] | None]:
+    """Делит общий список рейсов на туда и обратно по числу сегментов туда (пересадки + 1)."""
+    if not numbers:
+        return None, None
+    there, back = numbers[:first_count], numbers[first_count:]
+    return there or None, back or None
+
+
 def results_complete(snapshot: Snapshot | None) -> bool:
     """Проверяет полноту результатов поиска Озон Тревел по снимку сетевых ответов.
 
@@ -137,9 +188,7 @@ def parse_ozon_travel(snapshot: Snapshot, query: Query) -> list[Offer]:
     if not snapshot or not snapshot.json_payloads or getattr(snapshot, "blocked", False):
         return []
 
-    # Для туда-обратно (query.return_date) поддержка будет добавлена позже
-    if query is not None and query.return_date is not None:
-        return []
+    round_trip = query is not None and query.return_date is not None
 
     # Одни и те же виджет-ответы приходят несколько раз с обновлением;
     # выбираем ответ с наибольшим числом карточек (при равенстве более поздний).
@@ -218,47 +267,13 @@ def parse_ozon_travel(snapshot: Snapshot, query: Query) -> list[Offer]:
                 if a_text and isinstance(a_text, str):
                     airline = a_text.strip() or None
 
-            way_there = card.get("wayThereDetails")
-            if not isinstance(way_there, dict):
-                way_there = {}
-
-            trip_time_obj = way_there.get("tripTime")
-            trip_time_text = trip_time_obj.get("text", "") if isinstance(trip_time_obj, dict) else ""
-            dep_time = None
-            arr_time = None
-            if trip_time_text:
-                parts = re.split(r"\s*[-–—]\s*", trip_time_text.strip())
-                if len(parts) >= 2:
-                    dep_time = parts[0].strip()
-                    arr_time = parts[1].strip()
-                elif len(parts) == 1 and ":" in parts[0]:
-                    dep_time = parts[0].strip()
-
-            days_offset = 0
-            tdiff_obj = way_there.get("timeDifference")
-            if isinstance(tdiff_obj, dict):
-                raw_tdiff = tdiff_obj.get("text", "")
-                if raw_tdiff:
-                    norm_tdiff = raw_tdiff.translate(SUPERSCRIPT_TRANS)
-                    m = re.search(r"[+-]?\d+", norm_tdiff)
-                    if m:
-                        days_offset = int(m.group(0))
-
-            dep_at = None
-            arr_at = None
-            if query is not None and query.depart is not None:
-                if dep_time:
-                    dep_at = f"{query.depart.isoformat()}T{dep_time}"
-                if arr_time:
-                    arr_date = query.depart + timedelta(days=days_offset)
-                    arr_at = f"{arr_date.isoformat()}T{arr_time}"
-
-            dur_obj = way_there.get("tripDuration")
-            dur_text = dur_obj.get("text") if isinstance(dur_obj, dict) else None
-            duration = _parse_duration(dur_text)
-
-            transfers_list = way_there.get("transfers")
-            transfers_count, layovers = _parse_transfers_and_layovers(transfers_list)
+            there = _parse_leg(card.get("wayThereDetails"), query.depart if query is not None else None)
+            back_info = None
+            if round_trip:
+                back_details = card.get("wayBackDetails")
+                if not isinstance(back_details, dict):
+                    continue
+                back_info = _parse_leg(back_details, query.return_date)
 
             luggage_obj = card.get("luggageText")
             baggage = _parse_baggage(luggage_obj)
@@ -284,21 +299,36 @@ def parse_ozon_travel(snapshot: Snapshot, query: Query) -> list[Offer]:
                 except Exception:
                     flight_numbers = None
 
+            back_leg = None
+            if back_info is not None:
+                flight_numbers, back_numbers = _split_flight_numbers(flight_numbers, there["transfers"] + 1)
+                back_leg = Leg(
+                    depart_time=back_info["depart_time"],
+                    arrive_time=back_info["arrive_time"],
+                    duration=back_info["duration"],
+                    transfers=back_info["transfers"],
+                    flight_numbers=back_numbers,
+                    layovers=back_info["layovers"],
+                    depart_at=back_info["depart_at"],
+                    arrive_at=back_info["arrive_at"],
+                )
+
             offer = Offer(
                 site="ozon_travel",
                 price=price,
                 currency="RUB",
                 airline=airline,
-                depart_time=dep_time,
-                arrive_time=arr_time,
-                duration=duration,
-                transfers=transfers_count,
+                depart_time=there["depart_time"],
+                arrive_time=there["arrive_time"],
+                duration=there["duration"],
+                transfers=there["transfers"],
                 baggage=baggage,
                 url=offer_url,
                 flight_numbers=flight_numbers,
-                layovers=layovers,
-                depart_at=dep_at,
-                arrive_at=arr_at,
+                layovers=there["layovers"],
+                depart_at=there["depart_at"],
+                arrive_at=there["arrive_at"],
+                back=back_leg,
             )
             offer.offer_id = compute_offer_id(offer)
             offers.append(offer)
