@@ -49,3 +49,14 @@ def test_failed_site_gets_link():
                                         dropped_baggage=0, dropped_criteria=0)
     text = "\n".join(chunks)
     assert 'href="https://tutu.ru/x?a=1&amp;b=2"' in text
+
+
+def test_no_ozon_footer_when_ozon_searched():
+    from avia.criteria import SearchCriteria
+    from avia.formatting import build_compact_report
+    from avia.models import SiteResult
+
+    r = SiteResult(site="ozon_travel", ok=False, offers=[], error="капча", page_url="https://www.ozon.ru/x")
+    chunks, _, _ = build_compact_report(_q(), [r], SearchCriteria(), baggage_mode="any",
+                                        dropped_baggage=0, dropped_criteria=0)
+    assert "цены Озона бот не проверяет" not in "\n".join(chunks)

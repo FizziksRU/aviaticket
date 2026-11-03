@@ -37,6 +37,16 @@ def _error_line(r: SiteResult) -> str:
     return f"⚠️ <b>{escape(r.site)}</b>: {escape(r.error or 'ошибка')}" + _link_suffix(r)
 
 
+def _ozon_footer(q: Query, results: Sequence[SiteResult]) -> list[str]:
+    """Строка со ссылкой на Озон, только если бот сам его не искал (иначе Озон уже в списке сайтов)."""
+    if any(r.site == "ozon_travel" for r in results):
+        return []
+    return [
+        f'Озон Тревел: <a href="{escape(ozon_url(q), quote=True)}">открыть выдачу</a> '
+        "(цены Озона бот не проверяет)",
+    ]
+
+
 def _ago(ts: float, now: float | None = None) -> str:
     sec = max(0, (datetime.now().timestamp() if now is None else now) - ts)
     if sec < 3600:
@@ -296,9 +306,7 @@ def build_report(
             current_lines.extend(cont_header)
         current_lines.extend(url_lines)
 
-    footer_lines = [
-        f'Озон Тревел: <a href="{escape(ozon_url(q), quote=True)}">открыть выдачу</a> '
-        "(цены Озона бот не проверяет)",
+    footer_lines = _ozon_footer(q, results) + [
         "<i>Цены сняты со страницы сейчас, при покупке могут измениться.</i>"]
     if flat:
         footer_lines.append("Напишите номер билета, чтобы увидеть подробности.")
@@ -509,9 +517,7 @@ def build_compact_report(
             empty_lines.append("Попробуйте ослабить фильтры.")
         empty_lines.append("")
 
-    footer_lines = [
-        f'Озон Тревел: <a href="{escape(ozon_url(q), quote=True)}">открыть выдачу</a> '
-        "(цены Озона бот не проверяет)",
+    footer_lines = _ozon_footer(q, results) + [
         "<i>Цены сняты со страницы сейчас, при покупке могут измениться.</i>",
     ]
     if flat:
