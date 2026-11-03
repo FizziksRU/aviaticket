@@ -177,3 +177,54 @@ async def test_pipeline_site_without_phone_uses_chromium(monkeypatch):
     assert results2[0].ok is True
     assert chromium_called is True
     assert phone_called is False
+
+    # 3. Сайт с phone="auto", но без списка droidhub_devices -> тоже идёт через Chromium
+    chromium_called = False
+    phone_called = False
+    site_auto_empty = SiteConfig("site_auto", "https://site3.test/{origin}", phone="auto", parser="chrom_parser")
+    settings_auto_empty = Settings(sites=[site_auto_empty], droidhub_url="https://hub.test", droidhub_token="tok", droidhub_devices=[])
+
+    results3 = await search(q, settings_auto_empty, guard=SearchGuard(min_interval=0.0, retry_delay=0.0))
+    assert len(results3) == 1
+    assert results3[0].ok is True
+    assert chromium_called is True
+    assert phone_called is False
+
+
+@pytest.mark.asyncio
+async def test_pipeline_phone_auto_with_devices(monkeypatch):
+    """Сайт с phone='auto' при заданном пуле телефонов вызывает fetch_page_snapshot_any с кандидатами."""
+    received_candidates = []
+
+    async def fake_fetch_any(settings, candidates, url, **kwargs):
+        received_candidates.extend(candidates)
+        return Snapshot(
+            url=url,
+            text="Пул телефонов выдал билеты",
+            json_payloads=[("/search/results", '{"tickets": [{"price": 7700}]}')],
+            blocked=False,
+        ), True
+
+    monkeypatch.setattr("avia.pipeline.fetch_page_snapshot_any", fake_fetch_any)
+
+    def dummy_parser(snap, q):
+        return [Offer(site="pool_site", price=7700)]
+
+    monkeypatch.setitem(PARSERS, "pool_parser", dummy_parser)
+
+    site = SiteConfig("pool_site", "https://pool.test/{origin}{destination}", phone="auto", parser="pool_parser")
+    settings = Settings(
+        sites=[site],
+        droidhub_url="https://hub.test",
+        droidhub_token="secret",
+        droidhub_devices=["phone_a", "phone_b"],
+    )
+    q = Query("MOW", "ALA", date(2026, 12, 10))
+
+    results = await search(q, settings, guard=SearchGuard(min_interval=0.0, retry_delay=0.0))
+    assert len(results) == 1
+    assert results[0].ok is True
+    assert len(results[0].offers) == 1
+    assert results[0].offers[0].price == 7700
+    assert received_candidates == ["phone_a", "phone_b"]
+

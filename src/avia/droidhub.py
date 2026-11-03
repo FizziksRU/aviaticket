@@ -16,9 +16,20 @@ logger = logging.getLogger(__name__)
 # Блокировки по device_id для сериализации запросов к каждому конкретному телефону
 _device_locks: dict[str, asyncio.Lock] = {}
 
+# Состояние пула устройств
+_busy_devices: set[str] = set()
+_pool_condition: asyncio.Condition | None = None
+_pool_loop: asyncio.AbstractEventLoop | None = None
+_rr_counter: int = 0
+
 
 class DroidhubError(Exception):
     """Исключение при ошибках обращения к сервису droidhub."""
+
+    def __init__(self, message: str, status_code: int | None = None) -> None:
+        super().__init__(message)
+        self.message = message
+        self.status_code = status_code
 
 
 def _get_device_lock(device_id: str) -> asyncio.Lock:
@@ -35,19 +46,121 @@ def _get_device_lock(device_id: str) -> asyncio.Lock:
     return lock
 
 
+def _get_pool_condition() -> asyncio.Condition:
+    """Возвращает или создаёт asyncio.Condition, привязанный к текущему циклу событий."""
+    global _pool_condition, _pool_loop, _busy_devices
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        loop = None
+    if _pool_condition is None or _pool_loop is not loop:
+        _pool_condition = asyncio.Condition()
+        _pool_loop = loop
+        _busy_devices.clear()
+    return _pool_condition
+
+
+def _reset_pool() -> None:
+    """Сброс состояния пула (для изоляции тестов)."""
+    global _pool_condition, _pool_loop, _rr_counter
+    _busy_devices.clear()
+    _device_locks.clear()
+    _pool_condition = None
+    _pool_loop = None
+    _rr_counter = 0
+
+
+def candidates(settings: Settings, site: SiteConfig) -> list[str]:
+    """Возвращает список идентификаторов устройств для сайта.
+
+    Для 'auto' возвращает список устройств из настроек, иначе [site.phone].
+    """
+    phone = (getattr(site, "phone", None) or "").strip()
+    if phone == "auto":
+        devs = getattr(settings, "droidhub_devices", None) or []
+        return [d.strip() for d in devs if d and d.strip()]
+    return [phone] if phone else []
+
+
 def phone_enabled(settings: Settings, site: SiteConfig) -> bool:
-    """True только если site.phone, settings.droidhub_url и settings.droidhub_token заданы."""
-    return bool(
-        getattr(site, "phone", None)
-        and site.phone.strip()
-        and getattr(settings, "droidhub_url", None)
-        and settings.droidhub_url.strip()
-        and getattr(settings, "droidhub_token", None)
-        and settings.droidhub_token.strip()
-    )
+    """True, если заданы droidhub_url и droidhub_token, site.phone непустой и
+    (site.phone != 'auto' или settings.droidhub_devices непустой).
+    """
+    phone = (getattr(site, "phone", None) or "").strip()
+    url = (getattr(settings, "droidhub_url", None) or "").strip()
+    token = (getattr(settings, "droidhub_token", None) or "").strip()
+    if not (phone and url and token):
+        return False
+    if phone == "auto":
+        return bool(candidates(settings, site))
+    return True
 
 
-async def fetch_page_snapshot(
+async def acquire(candidates: list[str]) -> str:
+    """Ожидает, пока не освободится хотя бы одно устройство из списка кандидатов.
+
+    Берёт первое свободное устройство, начиная со смещения round-robin,
+    помечает его занятым и продвигает счётчик round-robin.
+    """
+    clean: list[str] = []
+    for c in candidates:
+        s = c.strip()
+        if s and s not in clean:
+            clean.append(s)
+    if not clean:
+        raise ValueError("список устройств-кандидатов пуст")
+
+    cond = _get_pool_condition()
+    async with cond:
+        while True:
+            global _rr_counter
+            n = len(clean)
+            offset = _rr_counter % n
+            for i in range(n):
+                dev = clean[(offset + i) % n]
+                lock = _device_locks.get(dev)
+                is_locked = lock.locked() if lock is not None else False
+                if dev not in _busy_devices and not is_locked:
+                    _busy_devices.add(dev)
+                    _rr_counter = (_rr_counter + 1) % 1_000_000
+                    return dev
+            await cond.wait()
+
+
+async def release(device_id: str) -> None:
+    """Освобождает устройство и будит ожидающие запросы."""
+    clean = device_id.strip()
+    cond = _get_pool_condition()
+    async with cond:
+        _busy_devices.discard(clean)
+        cond.notify_all()
+
+
+def _is_retryable_error(exc: Exception) -> bool:
+    """True для ошибок, при которых имеет смысл повторить запрос на другом телефоне.
+
+    Повторяем при:
+    - 502 (телефон недоступен или страница не открылась);
+    - 429 (очередь занята);
+    - сетевых ошибках и таймаутах.
+    Ошибки авторизации (401/403) не повторяем.
+    """
+    if not isinstance(exc, DroidhubError):
+        return False
+    status = getattr(exc, "status_code", None)
+    if status in (401, 403):
+        return False
+    msg = str(exc).lower()
+    if "401" in msg or "403" in msg or "авторизац" in msg:
+        return False
+    if status in (502, 429):
+        return True
+    if "502" in msg or "429" in msg or "таймаут" in msg or "сетевая ошибка" in msg or "timeout" in msg:
+        return True
+    return False
+
+
+async def _fetch_device_snapshot(
     settings: Settings,
     device_id: str,
     url: str,
@@ -57,15 +170,7 @@ async def fetch_page_snapshot(
     wait_for: str = "",
     client: httpx.AsyncClient | None = None,
 ) -> tuple[Snapshot, bool]:
-    """Открывает страницу на телефоне через droidhub и возвращает (Snapshot, finished).
-
-    Snapshot содержит:
-      - url: итоговый адрес страницы;
-      - text: полный видимый текст страницы;
-      - json_payloads: список пар (url, body) перехваченных JSON-ответов;
-      - blocked: True, если обнаружена капча (captcha=true).
-    finished: False, если выдача не догрузилась до конца за отведённое время.
-    """
+    """Выполняет непосредственный запрос к сервису droidhub для конкретного устройства."""
     device_id = device_id.strip()
     lock = _get_device_lock(device_id)
     async with lock:
@@ -94,13 +199,16 @@ async def fetch_page_snapshot(
             raise DroidhubError("сетевая ошибка при обращении к droidhub")
 
         if resp.status_code in (401, 403):
-            raise DroidhubError(f"ошибка авторизации droidhub ({resp.status_code}): неверный токен")
+            raise DroidhubError(
+                f"ошибка авторизации droidhub ({resp.status_code}): неверный токен",
+                status_code=resp.status_code,
+            )
         if resp.status_code == 429:
-            raise DroidhubError("очередь droidhub занята (429)")
+            raise DroidhubError("очередь droidhub занята (429)", status_code=429)
         if resp.status_code == 502:
-            raise DroidhubError("телефон недоступен или страница не открылась (502)")
+            raise DroidhubError("телефон недоступен или страница не открылась (502)", status_code=502)
         if resp.status_code != 200:
-            raise DroidhubError(f"ошибка droidhub (код {resp.status_code})")
+            raise DroidhubError(f"ошибка droidhub (код {resp.status_code})", status_code=resp.status_code)
 
         try:
             data = resp.json()
@@ -147,3 +255,106 @@ async def fetch_page_snapshot(
             blocked=captcha,
         )
         return snap, finished
+
+
+async def fetch_page_snapshot_any(
+    settings: Settings,
+    candidates: list[str],
+    url: str,
+    *,
+    wait_seconds: int = 40,
+    capture_json: list[str] | None = None,
+    wait_for: str = "",
+    client: httpx.AsyncClient | None = None,
+) -> tuple[Snapshot, bool]:
+    """Открывает страницу на любом свободном телефоне из candidates.
+
+    Берёт свободное устройство через acquire, делает запрос. Если телефон
+    недоступен (502), очередь занята (429) или возникла сетевая ошибка/таймаут,
+    и есть другие непробованные кандидаты — повторяет на следующем свободном устройстве.
+    Каждое устройство опрашивается максимум один раз за вызов.
+    Ошибки авторизации (401/403) пробрасываются сразу.
+    Капча не считается исключением и не повторяется.
+    """
+    clean_candidates: list[str] = []
+    for c in candidates:
+        s = c.strip()
+        if s and s not in clean_candidates:
+            clean_candidates.append(s)
+
+    if not clean_candidates:
+        raise DroidhubError("список устройств пуст")
+
+    tried: set[str] = set()
+    last_exc: Exception | None = None
+
+    while len(tried) < len(clean_candidates):
+        remaining = [c for c in clean_candidates if c not in tried]
+        if not remaining:
+            break
+        dev = await acquire(remaining)
+        tried.add(dev)
+        try:
+            snap, finished = await _fetch_device_snapshot(
+                settings,
+                dev,
+                url,
+                wait_seconds=wait_seconds,
+                capture_json=capture_json,
+                wait_for=wait_for,
+                client=client,
+            )
+            return snap, finished
+        except Exception as exc:
+            last_exc = exc
+            if not _is_retryable_error(exc):
+                raise
+            if not any(c for c in clean_candidates if c not in tried):
+                raise
+            log_exc = str(exc)
+            token = (getattr(settings, "droidhub_token", "") or "").strip()
+            if token and token in log_exc:
+                log_exc = log_exc.replace(token, "[REDACTED]")
+            logger.warning("Устройство %s вернуло ошибку (%s), пробуем следующее устройство", dev, log_exc)
+        finally:
+            await release(dev)
+
+    if last_exc is not None:
+        raise last_exc
+    raise DroidhubError("не удалось получить снимок страницы ни с одного устройства")
+
+
+async def fetch_page_snapshot(
+    settings: Settings,
+    device_id: str | list[str],
+    url: str,
+    *,
+    wait_seconds: int = 40,
+    capture_json: list[str] | None = None,
+    wait_for: str = "",
+    client: httpx.AsyncClient | None = None,
+) -> tuple[Snapshot, bool]:
+    """Открывает страницу на телефоне через droidhub и возвращает (Snapshot, finished).
+
+    Сохраняет совместимость с прежней сигнатурой (device_id: str) и поддерживает
+    передачу списка кандидатов (device_id: list[str]).
+    """
+    if isinstance(device_id, (list, tuple)):
+        return await fetch_page_snapshot_any(
+            settings,
+            list(device_id),
+            url,
+            wait_seconds=wait_seconds,
+            capture_json=capture_json,
+            wait_for=wait_for,
+            client=client,
+        )
+    return await fetch_page_snapshot_any(
+        settings,
+        [device_id],
+        url,
+        wait_seconds=wait_seconds,
+        capture_json=capture_json,
+        wait_for=wait_for,
+        client=client,
+    )

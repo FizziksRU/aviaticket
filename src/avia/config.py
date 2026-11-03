@@ -43,6 +43,7 @@ class Settings:
     tp_marker: str = ""           # партнёрский marker для ссылок
     droidhub_url: str = ""        # адрес сервиса droidhub (HTTP API)
     droidhub_token: str = ""      # токен авторизации droidhub
+    droidhub_devices: list[str] = field(default_factory=list)  # пул телефонов droidhub
     # llm_backend нужен только сайтам с use_llm: true
     # "agy_ssh" (аккаунт пула на VPS через SSH) или "gemini_local" (локальный gemini CLI)
     llm_backend: str = "gemini_local"
@@ -75,12 +76,16 @@ def load_settings(path: Path | None = None) -> Settings:
     allowed = {
         int(x) for x in os.getenv("TG_ALLOWED_IDS", "").replace(" ", "").split(",") if x
     }
+    droidhub_devices = [
+        x.strip() for x in os.getenv("DROIDHUB_DEVICES", "").split(",") if x.strip()
+    ]
     return Settings(
         sites=sites,
         tp_token=os.getenv("TP_TOKEN", ""),
         tp_marker=os.getenv("TP_MARKER", ""),
         droidhub_url=os.getenv("DROIDHUB_URL", ""),
         droidhub_token=os.getenv("DROIDHUB_TOKEN", ""),
+        droidhub_devices=droidhub_devices,
         llm_backend=os.getenv("LLM_BACKEND", "gemini_local"),
         gemini_cmd=os.getenv("GEMINI_CMD", "gemini"),
         gemini_model=os.getenv("GEMINI_MODEL") or None,
