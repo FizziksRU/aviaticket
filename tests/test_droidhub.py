@@ -247,3 +247,83 @@ async def test_device_locks_serialization(monkeypatch):
     assert res2[1] is True
     # Сериализация: максимум 1 одновременный запрос на телефон
     assert max_active_requests == 1
+
+
+def test_get_device_lock_event_loop_change():
+    """_get_device_lock создаёт новый Lock, если существующий привязан к другому event loop."""
+    from avia.droidhub import _device_locks, _get_device_lock
+
+    _device_locks.clear()
+
+    async def contend():
+        lock = _get_device_lock("dev1")
+        async def hold():
+            async with lock:
+                await asyncio.sleep(0.01)
+        await asyncio.gather(hold(), hold())
+        return lock
+
+    lock1 = asyncio.run(contend())
+    assert getattr(lock1, "_loop", None) is not None
+
+    # Запуск в новом цикле событий должен создать новый Lock вместо использования старого
+    lock2 = asyncio.run(contend())
+    assert lock2 is not lock1
+
+
+@pytest.mark.asyncio
+async def test_fetch_page_snapshot_null_text(monkeypatch):
+    """Ответ с text: null превращается в пустую строку текста без ошибки."""
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"url": "https://ok.test", "text": None, "finished": True})
+
+    _mock_async_client(monkeypatch, handler)
+
+    settings = Settings(sites=[], droidhub_url="https://hub.test", droidhub_token="tok")
+    snap, finished = await fetch_page_snapshot(settings, "realme", "https://site.test")
+    assert finished is True
+    assert snap.text == ""
+
+
+@pytest.mark.asyncio
+async def test_fetch_page_snapshot_wait_seconds_clamp(monkeypatch):
+    """wait_seconds <= 0 ограничивается значением 1."""
+    recorded_body: dict = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        recorded_body.update(json.loads(request.content.decode("utf-8")))
+        return httpx.Response(200, json={"url": "https://ok.test", "text": "ok", "finished": True})
+
+    _mock_async_client(monkeypatch, handler)
+
+    settings = Settings(sites=[], droidhub_url="https://hub.test", droidhub_token="tok")
+    await fetch_page_snapshot(settings, "realme", "https://site.test", wait_seconds=0)
+    assert recorded_body["wait_seconds"] == 1
+
+    await fetch_page_snapshot(settings, "realme", "https://site.test", wait_seconds=-10)
+    assert recorded_body["wait_seconds"] == 1
+
+
+@pytest.mark.asyncio
+async def test_fetch_page_snapshot_strip_credentials_and_device(monkeypatch):
+    """Пробелы и переводы строк в droidhub_url, droidhub_token и device_id очищаются."""
+    recorded_url = ""
+    recorded_auth = ""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal recorded_url, recorded_auth
+        recorded_url = str(request.url)
+        recorded_auth = request.headers.get("authorization", "")
+        return httpx.Response(200, json={"url": "https://ok.test", "text": "ok", "finished": True})
+
+    _mock_async_client(monkeypatch, handler)
+
+    settings = Settings(
+        sites=[],
+        droidhub_url="  https://hub.test/  \n",
+        droidhub_token="  secret_token_123 \n",
+    )
+    await fetch_page_snapshot(settings, "  realme \n", "https://site.test")
+    assert recorded_url == "https://hub.test/api/devices/realme/fetch_page"
+    assert recorded_auth == "Bearer secret_token_123"
+

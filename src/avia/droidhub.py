@@ -23,8 +23,12 @@ class DroidhubError(Exception):
 
 def _get_device_lock(device_id: str) -> asyncio.Lock:
     """Возвращает или создаёт asyncio.Lock для конкретного device_id."""
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        loop = None
     lock = _device_locks.get(device_id)
-    if lock is None:
+    if lock is None or (getattr(lock, "_loop", None) is not None and lock._loop is not loop):
         lock = asyncio.Lock()
         _device_locks[device_id] = lock
     return lock
@@ -62,10 +66,10 @@ async def fetch_page_snapshot(
     """
     lock = _get_device_lock(device_id)
     async with lock:
-        wait_val = min(int(wait_seconds), 60)
+        wait_val = max(1, min(int(wait_seconds), 60))
         timeout = float(wait_seconds + 60)
-        endpoint = f"{settings.droidhub_url.rstrip('/')}/api/devices/{device_id}/fetch_page"
-        headers = {"Authorization": f"Bearer {settings.droidhub_token}"}
+        endpoint = f"{settings.droidhub_url.strip().rstrip('/')}/api/devices/{device_id.strip()}/fetch_page"
+        headers = {"Authorization": f"Bearer {settings.droidhub_token.strip()}"}
         payload: dict[str, Any] = {
             "url": url,
             "wait_seconds": wait_val,
@@ -102,7 +106,7 @@ async def fetch_page_snapshot(
             raise DroidhubError("некорректная структура ответа droidhub")
 
         resp_url = str(data.get("url") or url)
-        resp_text = data.get("text", "")
+        resp_text = data.get("text") or ""
         if not isinstance(resp_text, str):
             raise DroidhubError("некорректный формат текста в ответе droidhub")
 
