@@ -11,6 +11,9 @@ def _isolated_price_history(tmp_path, monkeypatch):
     from avia.subscriptions import SubscriptionStore
 
     monkeypatch.setattr(avia.bot, "PriceHistory", lambda _path: PriceHistory(tmp_path / "history.sqlite"))
+    from avia.users import UserStore
+
+    monkeypatch.setattr(avia.bot, "UserStore", lambda _path: UserStore(tmp_path / "users.sqlite"))
     monkeypatch.setattr(avia.bot, "SubscriptionStore", lambda _path: SubscriptionStore(tmp_path / "subscriptions.sqlite"))
 
 

@@ -28,6 +28,7 @@ from .pipeline import search
 from .scheduler import Scheduler
 from .store import ResultStore
 from .subscriptions import SubscriptionStore
+from .users import UserStore
 
 log = logging.getLogger("avia.bot")
 API = "https://api.telegram.org/bot{token}/{method}"
@@ -42,11 +43,13 @@ class Bot:
     ):
         if not settings.tg_token:
             raise SystemExit("Задайте TG_BOT_TOKEN в .env")
-        if not settings.tg_allowed_ids:
-            raise SystemExit("Задайте TG_ALLOWED_IDS в .env (ваш Telegram id), иначе бот открыт всем")
+        if not settings.tg_allowed_ids and not settings.tg_open:
+            raise SystemExit("Задайте TG_ALLOWED_IDS в .env (ваш Telegram id) или TG_OPEN=1, иначе некому отвечать")
         self.s = settings
         self.http = httpx.AsyncClient(timeout=70)
         self.busy: set[int] = set()
+        self.users = UserStore(settings.storage_dir / "users.sqlite")
+        self._search_sem = asyncio.Semaphore(settings.max_parallel_searches)
         self.history = PriceHistory(settings.storage_dir / "history.sqlite")
         if dialog is not None:
             self.dialog = dialog
@@ -138,6 +141,16 @@ class Bot:
         if chat_id in self.busy:
             await self.send(chat_id, "Предыдущий поиск ещё идёт, подождите.")
             return
+        if (
+            chat_id not in self.s.tg_allowed_ids
+            and not self.users.try_use_search(chat_id, self.s.daily_search_limit)
+        ):
+            await self.send(
+                chat_id,
+                f"На сегодня лимит поисков исчерпан ({self.s.daily_search_limit}). Завтра можно снова; "
+                "отслеживания продолжают работать.",
+            )
+            return
         self.busy.add(chat_id)
         q = req.query
         baggage_mode = req.baggage_mode
@@ -150,7 +163,8 @@ class Bot:
             if isinstance(wait_msg, dict):
                 wait_msg_id = wait_msg.get("message_id")
 
-            results = await search(q, self.s)
+            async with self._search_sem:
+                results = await search(q, self.s)
             results = assign_ids(results)
             try:
                 await asyncio.to_thread(self.history.annotate, q, results)
@@ -221,10 +235,28 @@ class Bot:
                     except Exception:
                         pass
 
+    def _admit(self, user: dict, chat: dict | None) -> bool:
+        """Пускает администраторов и (в открытом режиме) любого человека из личного чата; регистрирует в users."""
+        user_id = user.get("id")
+        if not isinstance(user_id, int) or user.get("is_bot"):
+            return False
+        is_admin = user_id in self.s.tg_allowed_ids
+        if not is_admin:
+            if not self.s.tg_open:
+                return False
+            # подписки привязаны к tg id = id личного чата, группы и каналы не обслуживаем
+            if chat is not None and chat.get("type", "private") != "private":
+                return False
+        try:
+            rec = self.users.register(user_id, user.get("username"), user.get("first_name"))
+        except Exception:
+            log.exception("не удалось записать пользователя")
+            return is_admin
+        return is_admin or not rec.blocked
+
     async def handle(self, msg: dict):
         chat_id = msg["chat"]["id"]
-        user_id = msg.get("from", {}).get("id")
-        if user_id not in self.s.tg_allowed_ids:
+        if not self._admit(msg.get("from", {}), msg.get("chat")):
             return
         text = (msg.get("text") or "").strip()
         actions = self.dialog.on_text(chat_id, text)
@@ -232,10 +264,10 @@ class Bot:
 
     async def handle_callback(self, cq: dict):
         user_id = cq.get("from", {}).get("id")
-        if user_id not in self.s.tg_allowed_ids:
+        msg = cq.get("message") or {}
+        if not self._admit(cq.get("from", {}), msg.get("chat")):
             return
         cq_id = cq["id"]
-        msg = cq.get("message") or {}
         chat_id = msg.get("chat", {}).get("id")
         if chat_id is None:
             chat_id = user_id
@@ -266,10 +298,9 @@ class Bot:
                     pass
 
     async def _scheduler_search(self, q):
-        # фоновый опрос не должен мешать поиску пользователя: ждём, пока чаты свободны
-        while self.busy:
-            await asyncio.sleep(10)
-        return await search(q, self.s)
+        # телефоны общие: фоновый опрос стоит в той же очереди, что и поиски людей
+        async with self._search_sem:
+            return await search(q, self.s)
 
     async def _scheduler_notify(self, chat_id: int, text: str, reply_markup: dict | None) -> None:
         await self.send(chat_id, text, reply_markup=reply_markup)
