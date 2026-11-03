@@ -18,6 +18,7 @@ import asyncio
 import contextvars
 import json
 import logging
+import os
 import random
 import statistics
 import tempfile
@@ -122,6 +123,15 @@ async def _scenario(args: argparse.Namespace, clock: vclock.VirtualClock) -> dic
         dh._reset_pool()
         pipeline.guard = SearchGuard()
         tmp = Path(tempfile.mkdtemp(prefix="avia-load-"))
+        if args.phone_map == "optimal":
+            # измерено в фазе 2: aviasales, onetwotrip, yandex работают на «быстром» классе (realme),
+            # ozon, kupibilet, tutu — на «медленном» (redmi); код без PHONE_MAP переменную игнорирует
+            fast = ",".join(p.id for p in hub.phones.values() if p.klass == "fast")
+            slow = ",".join(p.id for p in hub.phones.values() if p.klass == "slow") or fast
+            os.environ["PHONE_MAP"] = ";".join(
+                [f"{s}={fast}" for s in ("aviasales", "onetwotrip", "yandex_travel")]
+                + [f"{s}={slow}" for s in ("ozon_travel", "kupibilet", "tutu")]
+            )
         base = load_settings()
         limit = {"A": 0, "B": 0, "C": 40}[args.scenario]
         settings = replace(
@@ -294,6 +304,8 @@ def main() -> None:
     ap.add_argument("--max-parallel", type=int, default=0)
     ap.add_argument("--seed", type=int, default=7)
     ap.add_argument("--patience", type=float, default=4 * 3600, help="сколько виртуальный человек ждёт выдачу, с")
+    ap.add_argument("--phone-map", choices=["", "optimal"], default="",
+                    help="optimal: PHONE_MAP по замерам фазы 2 (нужна ветка scale-audit-phones)")
     ap.add_argument("--tag", default="")
     args = ap.parse_args()
     logging.getLogger().setLevel(logging.WARNING)
