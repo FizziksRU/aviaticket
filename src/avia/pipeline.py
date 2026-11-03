@@ -10,7 +10,12 @@ import time
 
 from .collector import fetch_snapshot, Snapshot
 from .config import Settings, SiteConfig
-from .droidhub import DroidhubError, fetch_page_snapshot, phone_enabled
+from .droidhub import (
+    DroidhubError,
+    candidates,
+    fetch_page_snapshot_any,
+    phone_enabled,
+)
 from .extract import extract_offers
 from .guard import SearchGuard, friendly_error
 from .models import Offer, Query, SiteResult
@@ -211,9 +216,9 @@ async def _from_browser(site: SiteConfig, q: Query, settings: Settings) -> tuple
     url = build_url(site, q, extra=extra)
 
     if phone_enabled(settings, site):
-        snap, finished = await fetch_page_snapshot(
+        snap, finished = await fetch_page_snapshot_any(
             settings,
-            site.phone,
+            candidates(settings, site),
             url,
             wait_seconds=site.phone_wait_seconds,
             capture_json=site.phone_capture_json,
