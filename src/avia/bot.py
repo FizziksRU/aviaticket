@@ -77,6 +77,7 @@ class Bot:
         # общая очередь поисков людей и планировщика; SEARCH_PRIORITY=1 ставит людей вперёд
         self._search_sem = PrioritySlots(settings.max_parallel_searches)
         self.health = Health(skip_errors=(RT_UNSUPPORTED,))
+        self._alerts: set[asyncio.Task] = set()  # алерты админам не держат выдачу человеку
         self._queued = 0   # ждут слота поиска
         self._active = 0   # ищут сейчас
         self.history = PriceHistory(settings.storage_dir / "history.sqlite")
@@ -432,14 +433,17 @@ class Bot:
             if not acquired:
                 self._queued -= 1
         waited, took = t_start - t0, time.monotonic() - t_start
-        broken = self.health.record(results, kind=kind, seconds=waited + took)
+        # «от нажатия до выдачи» — только для людей: подписки при SEARCH_PRIORITY=1 ждут долго намеренно
+        broken = self.health.record(results, kind=kind, seconds=waited + took if kind == "user" else None)
         log.info(
             "search kind=%s %s-%s %s rt=%s wait=%.1fs took=%.1fs sites=%s",
             kind, q.origin, q.destination, q.depart, q.return_date or "-", waited, took,
             " ".join(_site_brief(r) for r in results),
         )
         if broken:
-            await self._alert_broken(broken)
+            task = asyncio.create_task(self._alert_broken(broken))
+            self._alerts.add(task)
+            task.add_done_callback(self._alerts.discard)
         return results
 
     async def _alert_broken(self, sites: list[str]) -> None:

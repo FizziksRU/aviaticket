@@ -69,6 +69,9 @@ class Health:
             self._search_seconds.append(float(seconds))
         broken: list[str] = []
         now = self.clock()
+        results = list(results)
+        # если ни один сайт не нашёл вариантов, пустые страницы — это «рейсов нет», а не поломка парсера
+        route_empty = not any(r.ok for r in results)
         for r in results:
             if r.cached:
                 self.counters["site_cache_hits"] += 1
@@ -76,6 +79,9 @@ class Health:
             error = r.error or ""
             if not r.ok and any(e in error for e in self.skip_errors):
                 continue  # сайт не умеет такой запрос (например, обратные билеты): это не сбой
+            if r.empty and route_empty:
+                self.counters["empty_routes"] += 1
+                continue
             self._sites.setdefault(r.site, deque(maxlen=self.history)).append(
                 Outcome(now, r.ok, len(r.offers), float(r.elapsed), r.partial, error[:_ERROR_PREVIEW])
             )
