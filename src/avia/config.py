@@ -64,6 +64,7 @@ class Settings:
     tg_open: bool = False          # True: бот отвечает всем, пользователи регистрируются в users.sqlite
     daily_search_limit: int = 40   # поисков в сутки на человека (0 = без лимита)
     max_parallel_searches: int = 2  # одновременных поисков во всём боте (телефоны одни на всех)
+    cache_partial: bool = True  # CACHE_PARTIAL=0: неполную выдачу сайта не кэшировать
 
 
 def load_settings(path: Path | None = None) -> Settings:
@@ -105,4 +106,5 @@ def load_settings(path: Path | None = None) -> Settings:
         tg_open=os.getenv("TG_OPEN", "0") == "1",
         daily_search_limit=int(os.getenv("DAILY_SEARCH_LIMIT", "40")),
         max_parallel_searches=max(1, int(os.getenv("MAX_PARALLEL_SEARCHES", "2"))),
+        cache_partial=os.getenv("CACHE_PARTIAL", "1") != "0",
     )

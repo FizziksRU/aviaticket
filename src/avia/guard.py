@@ -21,6 +21,10 @@ RETRYABLE_EXCEPTIONS = (
 )
 
 
+# потолок записей кэша: по одной на (сайт, запрос); каждая держит до тысяч офферов
+MAX_CACHE_ENTRIES = 1000
+
+
 class _InFlight:
     """Состояние запроса в полёте для схлопывания одновременных одинаковых вызовов."""
 
@@ -71,6 +75,16 @@ class SearchGuard:
         if inspect.isawaitable(res):
             await res
 
+    def _store(self, cache_key: tuple[str, Hashable], result: Any) -> None:
+        """Кладёт результат в кэш и выкидывает протухшие записи, чтобы кэш не рос без предела."""
+        now = self.clock()
+        expired = [k for k, (ts, _) in self._cache.items() if now - ts >= self.cache_ttl]
+        for k in expired:
+            del self._cache[k]
+        self._cache[cache_key] = (now, result)
+        while len(self._cache) > MAX_CACHE_ENTRIES:
+            del self._cache[next(iter(self._cache))]  # самая старая запись: dict хранит порядок вставки
+
     def _get_cached(self, cache_key: tuple[str, Hashable]) -> tuple[bool, Any]:
         """Возвращает (найдено, значение) из кэша с проверкой TTL."""
         if cache_key in self._cache:
@@ -86,8 +100,12 @@ class SearchGuard:
         key_query: Hashable,
         factory: Callable[[], Awaitable[T]],
         retry_delay: float | None = None,
+        cacheable: Callable[[T], bool] | None = None,
     ) -> tuple[T, bool]:
-        """Выполняет поиск через factory с кэшированием, защитой сайта и повтором при сбое."""
+        """Выполняет поиск через factory с кэшированием, защитой сайта и повтором при сбое.
+
+        cacheable(result) → False: результат отдаётся ждущим одинаковым запросам, но в кэш не кладётся.
+        """
         cache_key = (key_site, key_query)
 
         while True:
@@ -143,7 +161,8 @@ class SearchGuard:
                     result = await factory()
 
                 # Кэшируем только успешный результат (ошибки не кэшируются)
-                self._cache[cache_key] = (self.clock(), result)
+                if cacheable is None or cacheable(result):
+                    self._store(cache_key, result)
                 flight.result = result
                 flight.event.set()
                 return result, False
