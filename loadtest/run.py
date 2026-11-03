@@ -178,13 +178,14 @@ async def _scenario(args: argparse.Namespace, clock: vclock.VirtualClock) -> dic
             records.append(await u.search(d, r, track))
 
         if args.scenario == "A":
-            users = [VirtualUser(tg, 100_000 + i, random.Random(args.seed * 1000 + i), TODAY) for i in range(args.users)]
+            users = [VirtualUser(tg, 100_000 + i, random.Random(args.seed * 1000 + i), TODAY, patience=args.patience)
+                     for i in range(args.users)]
             await asyncio.gather(*(one_search(u, rng.uniform(0, 10), False) for u in users))
         else:
             heavy_rate = 20 if args.scenario == "B" else 60
 
             async def day(i: int) -> None:
-                u = VirtualUser(tg, 100_000 + i, random.Random(args.seed * 1000 + i), TODAY)
+                u = VirtualUser(tg, 100_000 + i, random.Random(args.seed * 1000 + i), TODAY, patience=args.patience)
                 rate = heavy_rate if i % 10 == 0 else 3
                 n = max(1, sum(1 for _ in range(rate * 4) if rng.random() < 0.25))
                 times = sorted(rng.uniform(8 * 3600, 24 * 3600) for _ in range(n))
@@ -245,6 +246,7 @@ def _report(args: argparse.Namespace, records: list[SearchRecord], searches: lis
         "virtual_seconds": round(elapsed), "real_seconds": round(real, 1),
         "searches_requested": len(records), "outcomes": dict(outcomes),
         "result_latency": {"p50": pct(lat, 50), "p95": pct(lat, 95), "max": pct(lat, 100), "n": len(lat)},
+        "wait_over": {f">{m}min": sum(1 for x in lat if x > m * 60) for m in (2, 5, 15, 60)},
         "first_response": {"p50": pct(first, 50), "p95": pct(first, 95), "max": pct(first, 100)},
         "dialog_step": {"p50": pct(steps, 50), "p95": pct(steps, 95), "max": pct(steps, 100)},
         "tracked": sum(r.tracked for r in records),
@@ -291,6 +293,7 @@ def main() -> None:
     ap.add_argument("--sites-auto", action="store_true", help="все сайты phone: auto (эксперимент)")
     ap.add_argument("--max-parallel", type=int, default=0)
     ap.add_argument("--seed", type=int, default=7)
+    ap.add_argument("--patience", type=float, default=4 * 3600, help="сколько виртуальный человек ждёт выдачу, с")
     ap.add_argument("--tag", default="")
     args = ap.parse_args()
     logging.getLogger().setLevel(logging.WARNING)
