@@ -99,6 +99,64 @@ async def test_cancelled_waiter_does_not_leak_slot():
 
 
 @pytest.mark.asyncio
+async def test_cancel_while_position_notice_is_sent_does_not_leak_slot():
+    slots = PrioritySlots(1)
+    gate = asyncio.Event()
+    notice_started = asyncio.Event()
+
+    async def holder():
+        async with slots.slot(INTERACTIVE):
+            await gate.wait()
+
+    async def slow_notice(pos: int) -> None:
+        notice_started.set()
+        await asyncio.Event().wait()  # Telegram завис
+
+    async def waiter():
+        async with slots.slot(INTERACTIVE, on_wait=slow_notice):
+            pass
+
+    h = asyncio.create_task(holder())
+    await asyncio.sleep(0)
+    w = asyncio.create_task(waiter())
+    await notice_started.wait()
+    w.cancel()
+    await asyncio.gather(w, return_exceptions=True)
+    gate.set()
+    await h
+    assert slots.busy == 0 and slots.waiting == 0
+    async with slots.slot(INTERACTIVE):
+        assert slots.busy == 1
+
+
+@pytest.mark.asyncio
+async def test_slow_notice_does_not_hold_a_granted_slot():
+    slots = PrioritySlots(1)
+    gate = asyncio.Event()
+    entered = asyncio.Event()
+
+    async def holder():
+        async with slots.slot(INTERACTIVE):
+            await gate.wait()
+
+    async def slow_notice(pos: int) -> None:
+        await asyncio.Event().wait()
+
+    async def waiter():
+        async with slots.slot(INTERACTIVE, on_wait=slow_notice):
+            entered.set()
+
+    h = asyncio.create_task(holder())
+    await asyncio.sleep(0)
+    w = asyncio.create_task(waiter())
+    await asyncio.sleep(0)
+    gate.set()
+    await asyncio.wait_for(entered.wait(), timeout=1)
+    await asyncio.gather(h, w)
+    assert slots.busy == 0
+
+
+@pytest.mark.asyncio
 async def test_eta_uses_moving_average_of_durations():
     slots = PrioritySlots(2, default_duration=100.0)
     assert slots.eta_seconds(position=4) == pytest.approx(200.0)
