@@ -1,0 +1,1 @@
+B_u10_p2 {"virtual_seconds": 86400, "real_seconds": 290.9, "outcomes": {"ok": 47}, "result_latency": {"p50": 52.1, "p95": 157.5, "max": 182.4, "n": 47}, "first_response": {"p50": 0.0, "p95": 0.0, "max": 0.0}, "phones_util": {"realme": 0.135, "redmi": 0.07}, "pipeline_searches": {"user": 47, "scheduler": 165}}

@@ -176,7 +176,8 @@ async def _process_snapshot(
     if site.parser and parser is None:
         raise RuntimeError(f"парсер {site.parser!r} не зарегистрирован")
     if parser:
-        offers = parser(snap, q)
+        # разбор тела в 3–5 МБ занимает до сотен мс: в потоке, чтобы не держать event loop
+        offers = await asyncio.to_thread(parser, snap, q)
         for o in offers:
             o.site = site.name
         checker = getattr(parser, "results_complete", None)
@@ -187,7 +188,7 @@ async def _process_snapshot(
                 checker = getattr(mod, "results_complete", None)
         if callable(checker):
             try:
-                if not checker(snap):
+                if not await asyncio.to_thread(checker, snap):
                     partial = True
             except Exception:
                 pass
@@ -318,6 +319,8 @@ async def _run_site(
             key_site=site.name,
             key_query=q,
             factory=_fetch,
+            # неполную выдачу (yandex 2/20 партнёров) не раздаём всем на cache_ttl, если CACHE_PARTIAL=0
+            cacheable=None if settings.cache_partial else (lambda res: not res[2]),
         )
         return SiteResult(
             site=site.name,
