@@ -111,17 +111,21 @@ def phone_enabled(settings: Settings, site: SiteConfig) -> bool:
 
 
 def retry_candidates(settings: Settings, site: SiteConfig, failed_device: str | None) -> list[str]:
-    """Телефоны для повтора пустой выдачи: при RETRY_OTHER_PHONE любой из пула, кроме failed_device.
+    """Телефоны для повтора пустой выдачи при RETRY_OTHER_PHONE: другой телефон, а не failed_device.
 
     Выдача зависит от пары «сайт × телефон», поэтому повтор на том же телефоне часто снова пуст.
-    Если других телефонов нет или режим выключен, возвращает обычных кандидатов сайта.
+    Сначала берутся другие телефоны сайта (из PHONE_MAP или sites.yaml): на них сайт заведомо работает.
+    Только если таких нет, повтор идёт на остальной пул. Без режима или без других телефонов —
+    обычные кандидаты сайта.
     """
     base = candidates(settings, site)
     if not getattr(settings, "retry_other_phone", False) or not failed_device:
         return base
-    pool = base + [d for d in (getattr(settings, "droidhub_devices", None) or []) if d not in base]
-    others = [d for d in pool if d != failed_device]
-    return others or base
+    own_others = [d for d in base if d != failed_device]
+    if own_others:
+        return own_others
+    pool = [d for d in (getattr(settings, "droidhub_devices", None) or []) if d != failed_device]
+    return pool or base
 
 
 async def acquire(candidates: list[str]) -> str:
