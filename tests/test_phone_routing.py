@@ -69,6 +69,15 @@ def test_phone_map_can_move_desktop_site_to_phone():
     assert phone_enabled(hub_settings(phone_map={"tutu": ["redmi"]}), site)
 
 
+def test_retry_prefers_other_phones_of_the_site_before_the_rest_of_pool():
+    s = hub_settings(retry_other_phone=True, droidhub_devices=["realme", "redmi", "phone3", "phone4"],
+                     phone_map={"onetwotrip": ["realme", "phone3"]})
+    site = SiteConfig("onetwotrip", "https://x.test", phone="realme")
+    assert retry_candidates(s, site, "realme") == ["phone3"]
+    lone = hub_settings(retry_other_phone=True, phone_map={"onetwotrip": ["realme"]})
+    assert retry_candidates(lone, site, "realme") == ["redmi"]
+
+
 def test_retry_candidates_exclude_failed_phone_only_when_enabled():
     site = SiteConfig("ozon_travel", "https://x.test", phone="realme")
     assert retry_candidates(hub_settings(), site, "realme") == ["realme"]
