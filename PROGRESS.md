@@ -1,7 +1,7 @@
 # PROGRESS
 
-**Статус:** фаза 2 ✅, 3 ⏳ (B/C считаются), 4 ✅, 6 ⏳ (6 веток готовы).
-**Обновлено:** 2026-11-03 21:14 UTC
+**Статус:** фазы 2, 4 ✅; 3, 5, 6 — черновики готовы, идут прогоны «до/после».
+**Обновлено:** 2026-11-03 21:44 UTC
 
 ## Как продолжить после обрыва сессии
 - Работа идёт в worktree `~/avia-scale/work`, ветка `scale-audit`. `~/avia-scale/aviaticket` — checkout владельца с `.env`, туда не заходить.
@@ -19,7 +19,7 @@
 | 2 | DroidHub: контракт и замеры | ✅ | `docs/audit/02_droidhub.md` |
 | 3 | Модель мощности и моки | ⏳ | `docs/audit/03_capacity.md`, `loadtest/` |
 | 4 | Техдолг | ✅ | `docs/audit/04_tech_debt.md` |
-| 5 | Roadmap и ADR | — | `docs/audit/05_roadmap.md`, `docs/adr/` |
+| 5 | Roadmap и ADR | ⏳ | `docs/audit/05_roadmap.md`, `docs/adr/` |
 | 6 | Быстрые улучшения | ⏳ | ветки `scale-audit-<тема>` в worktree `~/avia-scale/dev`, `docs/audit/06_changes.md` |
 | 7 | Итог | — | `docs/audit/00_SUMMARY.md` |
 
@@ -44,3 +44,7 @@
 - 21:00–21:12 серия на деградацию: 6×kupibilet@realme 5,2–6,3 с, 6×tutu@redmi 9,8–12 с, деградации нет, 0 капч, realme +0,9 °C, экран realme остался включён. Добор: aviasales@redmi 2/2 успешно (теперь 3/5), ozon@realme 1/2 (теперь 1/4). Мок переведён на профиль v2 (DECISIONS #16). 02_droidhub.md закрыт.
 - Результаты MCP fetch_page > лимита сами сохраняются в `~/.claude/projects/.../tool-results/`, разбор: `tools/ing2.sh TS_A SITE PHONE TS_B SITE PHONE`.
 - Дальше: ветка `scale-audit-deploy` (Dockerfile, compose), интеграция `scale-audit-all`, прогоны «до/после» на v2 (`--phone-map optimal`, флаги из .env), таблица B/C, 05_roadmap + ADR, 06_changes, 00_SUMMARY.
+- 21:14–21:44 ветка `scale-audit-deploy` 33eaa6d (Dockerfile, compose, systemd; образ не собирался — демон Docker не запущен). Интеграция `scale-audit-all` 30b6232 (все 7 веток, 523 passed). Ветка `scale-audit-pipeline` b05a8db в отдельном worktree `~/avia-scale/dev2` (парсер в to_thread, кэш с потолком 1000, CACHE_PARTIAL) — влить в all ПОСЛЕ прогонов: `loadtest/compare.sh` берёт код из `~/avia-scale/dev/src`, ветку в dev не переключать, пока идут прогоны.
+- Прогоны: `loadtest/compare.sh` (варианты base/all/phones/tuned, профиль v2) → `loadtest/results/compare_A_v2.txt`, `compare_B_v2.txt`; JSON `*_v2<вариант>.json`, таблица `python3 loadtest/table.py 'loadtest/results/A_*_v2*.json'`. Первая точка A u50/p2: последний ждёт 45 → 33 мин (phones) → 30 мин (tuned).
+- Готовы черновики: 03_capacity (A, формулы, гипотезы; §5–6 ждут цифр), 05_roadmap, ADR 001–004, 06_changes (таблица «до/после» ждёт цифр). Гипотеза 8 подтверждена документацией Travelpayouts (Search API — 50k MAU, Data API — кэш 48 ч / 7 дней).
+- Осталось: заполнить цифры в 03 §5–6 и 06, влить pipeline в all, эксперименты-изоляции (`--max-parallel 100`, `--sites-auto`, `--ideal`) на base v2, 00_SUMMARY, PROGRESS DONE.
