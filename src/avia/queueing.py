@@ -51,17 +51,22 @@ class PrioritySlots:
             fut: asyncio.Future[None] = asyncio.get_running_loop().create_future()
             entry = (priority, next(self._seq), fut)
             heapq.heappush(self._heap, entry)
+            # сообщение о позиции шлём отдельной задачей: медленный Telegram не должен держать
+            # уже выданный слот, а отмена во время отправки — терять его
+            notice = None
             if on_wait is not None:
-                try:
-                    await on_wait(self.position(entry[0], entry[1]))
-                except Exception:  # сообщение о позиции не должно ломать поиск
-                    pass
+                notice = asyncio.ensure_future(_quietly(on_wait(self.position(entry[0], entry[1]))))
             try:
                 await fut
             except asyncio.CancelledError:
                 if fut.done() and not fut.cancelled():
                     self._release()  # слот уже передан нам, а мы уходим: отдаём дальше
+                else:
+                    fut.cancel()  # _release пропустит отменённую запись
                 raise
+            finally:
+                if notice is not None and not notice.done():
+                    notice.cancel()
         loop = asyncio.get_running_loop()
         started = loop.time()
         try:
@@ -77,3 +82,11 @@ class PrioritySlots:
                 fut.set_result(None)  # слот переходит следующему, busy не меняется
                 return
         self.busy -= 1
+
+
+async def _quietly(coro: Awaitable[None]) -> None:
+    """Сообщение о позиции в очереди не должно ломать поиск."""
+    try:
+        await coro
+    except Exception:
+        pass
