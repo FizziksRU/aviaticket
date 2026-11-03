@@ -28,19 +28,21 @@ SAMPLE_RETURN = date(2026, 11, 27)
 
 # Замеры фазы 2 (docs/audit/phase2_runs.csv): секунды успешного fetch по классу телефона.
 # fast = realme C21Y, slow = Redmi Note 11.
+# Профиль v2 (после добора в 21:00–21:12): прогоны A до этого момента и B/C считались на v1,
+# где aviasales@slow промахивался в 0,67 случаев (1/3), ozon@fast — всегда (0/2).
 TIMINGS: dict[str, dict[str, list[float]]] = {
-    "aviasales": {"fast": [22.9, 22.0], "slow": [37.7]},
+    "aviasales": {"fast": [22.9, 22.0], "slow": [37.7, 39.2, 30.1]},
     "aviasales_rt": {"fast": [46.0], "slow": [46.3]},
-    "kupibilet": {"fast": [6.0, 7.0, 6.3], "slow": [12.8, 12.3, 14.9]},
-    "tutu": {"fast": [5.5, 5.2, 12.7], "slow": [13.9, 12.1, 16.3]},
+    "kupibilet": {"fast": [6.0, 7.0, 6.3, 6.3, 6.0, 5.4, 5.7, 5.2, 5.2], "slow": [12.8, 12.3, 14.9]},
+    "tutu": {"fast": [5.5, 5.2, 12.7], "slow": [13.9, 12.1, 16.3, 12.0, 10.3, 10.7, 10.1, 9.8, 9.9]},
     "yandex_travel": {"fast": [7.7, 6.5], "slow": [15.5, 13.0, 12.2]},
     "onetwotrip": {"fast": [7.3, 8.3], "slow": [30.0]},
-    "ozon_travel": {"fast": [31.2], "slow": [9.1, 9.7, 8.7]},
+    "ozon_travel": {"fast": [6.3], "slow": [9.1, 9.7, 8.7]},
 }
 # Доля «JSON не перехвачен» (страница есть, json_responses пуст) и «ошибка инструмента» (502).
 MISS: dict[tuple[str, str, bool], float] = {
-    ("aviasales", "slow", False): 0.67, ("aviasales", "slow", True): 1.0,
-    ("ozon_travel", "fast", False): 1.0, ("ozon_travel", "fast", True): 1.0,
+    ("aviasales", "slow", False): 0.4, ("aviasales", "slow", True): 1.0,
+    ("ozon_travel", "fast", False): 0.75, ("ozon_travel", "fast", True): 1.0,
     ("onetwotrip", "fast", True): 1.0,
     ("yandex_travel", "fast", True): 0.5,
 }
