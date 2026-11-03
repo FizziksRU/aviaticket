@@ -5,6 +5,7 @@ import asyncio
 from html import escape
 import logging
 import secrets
+import time
 
 import httpx
 
@@ -22,9 +23,11 @@ from .dialog import (
 from .filters import apply_criteria
 from .formatting import build_compact_report, build_report, format_details
 from .guard import friendly_error
+from .health import Health
 from .history import PriceHistory
+from .models import SiteResult
 from .offers import assign_ids, filter_by_baggage
-from .pipeline import search
+from .pipeline import RT_UNSUPPORTED, search
 from .scheduler import Scheduler
 from .store import ResultStore
 from .subscriptions import SubscriptionStore
@@ -32,6 +35,12 @@ from .users import UserStore
 
 log = logging.getLogger("avia.bot")
 API = "https://api.telegram.org/bot{token}/{method}"
+
+
+def _site_brief(r: SiteResult) -> str:
+    """kupibilet:ok/200/6s, aviasales:err/0/46s, tutu:cache/10/0s — для строки лога поиска."""
+    state = "cache" if r.cached else ("partial" if r.ok and r.partial else ("ok" if r.ok else "err"))
+    return f"{r.site}:{state}/{len(r.offers)}/{r.elapsed:.0f}s"
 
 
 class Bot:
@@ -50,6 +59,9 @@ class Bot:
         self.busy: set[int] = set()
         self.users = UserStore(settings.storage_dir / "users.sqlite")
         self._search_sem = asyncio.Semaphore(settings.max_parallel_searches)
+        self.health = Health(skip_errors=(RT_UNSUPPORTED,))
+        self._queued = 0   # ждут слота поиска
+        self._active = 0   # ищут сейчас
         self.history = PriceHistory(settings.storage_dir / "history.sqlite")
         if dialog is not None:
             self.dialog = dialog
@@ -163,8 +175,7 @@ class Bot:
             if isinstance(wait_msg, dict):
                 wait_msg_id = wait_msg.get("message_id")
 
-            async with self._search_sem:
-                results = await search(q, self.s)
+            results = await self._timed_search(q, kind="user")
             results = assign_ids(results)
             try:
                 await asyncio.to_thread(self.history.annotate, q, results)
@@ -259,7 +270,7 @@ class Bot:
         if not self._admit(msg.get("from", {}), msg.get("chat")):
             return
         text = (msg.get("text") or "").strip()
-        if text.startswith(("/stats", "/block", "/unblock")):
+        if text.startswith(("/stats", "/status", "/block", "/unblock")):
             if msg.get("from", {}).get("id") in self.s.tg_allowed_ids:
                 await self._admin_command(chat_id, text)
             return
@@ -270,6 +281,9 @@ class Bot:
         """/stats — сводка и последние люди; /block <id>, /unblock <id> — закрыть или вернуть доступ."""
         cmd, _, arg = text.partition(" ")
         cmd = cmd.split("@")[0]
+        if cmd == "/status":
+            await self.send(chat_id, self._status_text())
+            return
         if cmd == "/stats":
             st = self.users.stats()
             lines = [
@@ -335,8 +349,78 @@ class Bot:
 
     async def _scheduler_search(self, q):
         # телефоны общие: фоновый опрос стоит в той же очереди, что и поиски людей
-        async with self._search_sem:
-            return await search(q, self.s)
+        return await self._timed_search(q, kind="scheduler")
+
+    async def _timed_search(self, q, *, kind: str) -> list[SiteResult]:
+        """Поиск через общий слот с учётом в /status, строкой лога и сигналом о сломанных сайтах."""
+        t0 = time.monotonic()
+        self._queued += 1
+        acquired = False
+        try:
+            async with self._search_sem:
+                self._queued -= 1
+                acquired = True
+                self._active += 1
+                t_start = time.monotonic()
+                try:
+                    results = await search(q, self.s)
+                finally:
+                    self._active -= 1
+        finally:
+            if not acquired:
+                self._queued -= 1
+        waited, took = t_start - t0, time.monotonic() - t_start
+        broken = self.health.record(results, kind=kind, seconds=waited + took)
+        log.info(
+            "search kind=%s %s-%s %s rt=%s wait=%.1fs took=%.1fs sites=%s",
+            kind, q.origin, q.destination, q.depart, q.return_date or "-", waited, took,
+            " ".join(_site_brief(r) for r in results),
+        )
+        if broken:
+            await self._alert_broken(broken)
+        return results
+
+    async def _alert_broken(self, sites: list[str]) -> None:
+        stats = {st.site: st for st in self.health.stats()}
+        for site in sites:
+            st = stats[site]
+            log.warning("сайт %s: %d сборов подряд без результата (%s)", site, st.failures_in_row, st.last_error)
+        if not self.s.health_alerts:
+            return
+        lines = ["⚠️ Источники перестали отвечать:"]
+        for site in sites:
+            st = stats[site]
+            lines.append(f"• {escape(site)}: {st.failures_in_row} раза подряд, {escape(st.last_error or 'без текста ошибки')}")
+        lines.append("Подробности: /status")
+        for admin in self.s.tg_allowed_ids:
+            try:
+                await self.send(admin, "\n".join(lines))
+            except Exception:
+                log.exception("не удалось отправить сигнал о сломанном сайте админу %s", admin)
+
+    def _status_text(self) -> str:
+        h = self.health
+        up_min = int((h.clock() - h.started_at) // 60)
+        lines = [
+            f"Работает {up_min} мин. Поиски: людей {h.counters['searches_user']}, "
+            f"подписок {h.counters['searches_scheduler']}, ответов сайтов из кэша {h.counters['site_cache_hits']}.",
+            f"Сейчас ищут {self._active} из {self.s.max_parallel_searches}, в очереди {self._queued}, "
+            f"ждут выдачу {len(self.busy)} чел.",
+        ]
+        pct = h.search_percentiles()
+        if pct is not None:
+            lines.append(f"От нажатия до выдачи: p50 {pct[0]:.0f} с, p95 {pct[1]:.0f} с")
+        lines.append("")
+        stats = h.stats()
+        if not stats:
+            lines.append("Сборов пока не было.")
+        for st in stats:
+            mark = "🔴" if st.failures_in_row >= h.alert_after else ("🟡" if st.ok < st.total else "🟢")
+            line = f"{mark} {escape(st.site)}: {st.ok}/{st.total} ok, partial {st.partial}, {st.avg_elapsed:.0f} с"
+            if st.failures_in_row:
+                line += f", подряд без результата {st.failures_in_row}: {escape(st.last_error)}"
+            lines.append(line)
+        return "\n".join(lines)
 
     async def _scheduler_notify(self, chat_id: int, text: str, reply_markup: dict | None) -> None:
         await self.send(chat_id, text, reply_markup=reply_markup)
