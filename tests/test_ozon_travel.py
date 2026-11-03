@@ -130,6 +130,15 @@ def test_baggage_included_when_no_surcharge():
     assert len(offers_combo) == 1
     assert offers_combo[0].baggage == "с багажом"
 
+    # Проверка формулировок с отрицанием вида "Багаж не включен" и "Платный багаж" -> "без багажа"
+    for phrase in ["Багаж не включен", "Багаж не включён", "Платный багаж"]:
+        card_neg = dict(base_data["state"]["flights"][0])
+        card_neg["luggageText"] = {"text": phrase}
+        snap_neg = make_snapshot([(WIDGET_URL, json.dumps({"state": {"flights": [card_neg]}}))])
+        offers_neg = parse_ozon_travel(snap_neg, _q())
+        assert len(offers_neg) == 1
+        assert offers_neg[0].baggage == "без багажа"
+
 
 def test_time_difference_date_offsets():
     """Сдвиг даты прилёта корректно обрабатывает надстрочные индексы и знаки (+ и -)."""

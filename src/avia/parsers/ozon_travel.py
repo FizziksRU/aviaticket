@@ -91,6 +91,8 @@ def _parse_baggage(luggage_obj: Any) -> str | None:
 
     if re.search(r"\+\s*\d+", text_clean) or "доплат" in text_lower:
         return "без багажа"
+    if "не включ" in text_lower or "платн" in text_lower:
+        return "без багажа"
     if "ручная кладь" in text_lower and "багаж" not in text_lower:
         return "без багажа"
     if "без багажа" in text_lower:
