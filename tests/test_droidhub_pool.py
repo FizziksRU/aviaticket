@@ -331,10 +331,6 @@ def test_load_settings_droidhub_devices(monkeypatch):
     settings_empty = load_settings()
     assert settings_empty.droidhub_devices == []
 
-    monkeypatch.delenv("DROIDHUB_DEVICES", raising=False)
-    settings_none = load_settings()
-    assert settings_none.droidhub_devices == []
-
 
 @pytest.mark.asyncio
 async def test_token_never_in_error_or_logs(monkeypatch, caplog):

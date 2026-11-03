@@ -12,3 +12,10 @@ def _isolated_price_history(tmp_path, monkeypatch):
 
     monkeypatch.setattr(avia.bot, "PriceHistory", lambda _path: PriceHistory(tmp_path / "history.sqlite"))
     monkeypatch.setattr(avia.bot, "SubscriptionStore", lambda _path: SubscriptionStore(tmp_path / "subscriptions.sqlite"))
+
+
+@pytest.fixture(autouse=True)
+def _no_real_droidhub(monkeypatch):
+    """Тесты не ходят на телефоны: пустые значения из окружения load_dotenv из .env не перетирает."""
+    for name in ("DROIDHUB_URL", "DROIDHUB_TOKEN", "DROIDHUB_DEVICES"):
+        monkeypatch.setenv(name, "")
