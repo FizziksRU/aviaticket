@@ -64,6 +64,24 @@ class Settings:
     tg_open: bool = False          # True: бот отвечает всем, пользователи регистрируются в users.sqlite
     daily_search_limit: int = 40   # поисков в сутки на человека (0 = без лимита)
     max_parallel_searches: int = 2  # одновременных поисков во всём боте (телефоны одни на всех)
+    # PHONE_MAP: сайт → телефоны поверх phone из sites.yaml («ozon_travel=redmi;aviasales=realme»)
+    phone_map: dict[str, list[str]] = field(default_factory=dict)
+    retry_other_phone: bool = False  # RETRY_OTHER_PHONE=1: повтор пустой выдачи на другом телефоне
+
+
+def parse_phone_map(raw: str) -> dict[str, list[str]]:
+    """«site=phone[,phone];site2=phone» → {site: [phone, ...]}; ошибка формата — ValueError."""
+    result: dict[str, list[str]] = {}
+    for part in raw.split(";"):
+        part = part.strip()
+        if not part:
+            continue
+        site, sep, phones = part.partition("=")
+        devices = [d.strip() for d in phones.split(",") if d.strip()]
+        if not sep or not site.strip() or not devices:
+            raise ValueError(f"PHONE_MAP: ожидается «сайт=телефон[,телефон]», получено «{part}»")
+        result[site.strip()] = devices
+    return result
 
 
 def load_settings(path: Path | None = None) -> Settings:
@@ -105,4 +123,6 @@ def load_settings(path: Path | None = None) -> Settings:
         tg_open=os.getenv("TG_OPEN", "0") == "1",
         daily_search_limit=int(os.getenv("DAILY_SEARCH_LIMIT", "40")),
         max_parallel_searches=max(1, int(os.getenv("MAX_PARALLEL_SEARCHES", "2"))),
+        phone_map=parse_phone_map(os.getenv("PHONE_MAP", "")),
+        retry_other_phone=os.getenv("RETRY_OTHER_PHONE", "0") == "1",
     )

@@ -13,6 +13,7 @@ from .config import Settings, SiteConfig
 from .droidhub import (
     DroidhubError,
     candidates,
+    retry_candidates,
     fetch_page_snapshot_any,
     phone_enabled,
 )
@@ -42,11 +43,13 @@ class ParserEmptyError(Exception):
         message: str,
         page_url: str | None = None,
         snapshot_path: Path | None = None,
+        device: str | None = None,
     ) -> None:
         super().__init__(message)
         self.message = message
         self.page_url = page_url
         self.snapshot_path = snapshot_path
+        self.device = device  # телефон, на котором выдача оказалась пустой
 
 
 def _save_empty_snapshot(
@@ -191,6 +194,7 @@ async def _process_snapshot(
                 "формат выдачи мог измениться, 0 вариантов при непустой странице",
                 page_url=snap.url,
                 snapshot_path=snap_path,
+                device=snap.device,
             )
 
     had_offers = bool(offers)
@@ -203,6 +207,7 @@ async def _process_snapshot(
             "сайт вернул билеты на другие даты, а не на запрошенные",
             page_url=snap.url,
             snapshot_path=snap_path,
+            device=snap.device,
         )
 
     for o in offers:
@@ -211,14 +216,16 @@ async def _process_snapshot(
     return sorted(offers, key=lambda o: o.price), snap.url, partial
 
 
-async def _from_browser(site: SiteConfig, q: Query, settings: Settings) -> tuple[list[Offer], str | None, bool]:
+async def _from_browser(
+    site: SiteConfig, q: Query, settings: Settings, devices: list[str] | None = None
+) -> tuple[list[Offer], str | None, bool]:
     extra = await resolve_extra(site, q)
     url = build_url(site, q, extra=extra)
 
     if phone_enabled(settings, site):
         snap, finished = await fetch_page_snapshot_any(
             settings,
-            candidates(settings, site),
+            devices or candidates(settings, site),
             url,
             wait_seconds=site.phone_wait_seconds,
             capture_json=site.phone_capture_json,
@@ -290,6 +297,8 @@ async def _run_site(
                     EMPTY_RETRY_DELAY,
                 )
                 await asyncio.sleep(EMPTY_RETRY_DELAY)
+                if settings.retry_other_phone and exc.device and phone_enabled(settings, site):
+                    return await _from_browser(site, q, settings, retry_candidates(settings, site, exc.device))
                 return await _from_browser(site, q, settings)
 
     try:
