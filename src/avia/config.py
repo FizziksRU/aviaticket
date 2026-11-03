@@ -64,6 +64,13 @@ class Settings:
     tg_open: bool = False          # True: бот отвечает всем, пользователи регистрируются в users.sqlite
     daily_search_limit: int = 40   # поисков в сутки на человека (0 = без лимита)
     max_parallel_searches: int = 2  # одновременных поисков во всём боте (телефоны одни на всех)
+    # SearchGuard: пауза между стартами поисков одного сайта, кэш выдачи, параллельных поисков сайта
+    guard_min_interval: float = 30.0
+    guard_cache_ttl: float = 300.0
+    guard_site_concurrency: int = 1
+    sites_per_search: int = 2       # сайтов одновременно внутри одного поиска
+    search_priority: bool = False   # True: поиски людей впереди фонового опроса подписок
+    queue_notice: bool = False      # True: писать человеку «вы N-й в очереди, примерно M мин»
 
 
 def load_settings(path: Path | None = None) -> Settings:
@@ -105,4 +112,10 @@ def load_settings(path: Path | None = None) -> Settings:
         tg_open=os.getenv("TG_OPEN", "0") == "1",
         daily_search_limit=int(os.getenv("DAILY_SEARCH_LIMIT", "40")),
         max_parallel_searches=max(1, int(os.getenv("MAX_PARALLEL_SEARCHES", "2"))),
+        guard_min_interval=max(0.0, float(os.getenv("GUARD_MIN_INTERVAL", "30"))),
+        guard_cache_ttl=max(0.0, float(os.getenv("GUARD_CACHE_TTL", "300"))),
+        guard_site_concurrency=max(1, int(os.getenv("GUARD_SITE_CONCURRENCY", "1"))),
+        sites_per_search=max(1, int(os.getenv("SITES_PER_SEARCH", "2"))),
+        search_priority=os.getenv("SEARCH_PRIORITY", "0") == "1",
+        queue_notice=os.getenv("QUEUE_NOTICE", "0") == "1",
     )

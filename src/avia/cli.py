@@ -9,7 +9,7 @@ from .config import load_settings
 from .formatting import format_report
 from .guard import friendly_error
 from .parsing import ParseError, parse_query
-from .pipeline import search
+from .pipeline import configure, search
 
 
 def main():
@@ -19,6 +19,7 @@ def main():
         sys.exit(str(e))
     s = load_settings()
     s.headless = "--show" not in sys.argv  # --show: видеть браузер
+    configure(s)
     try:
         results = asyncio.run(search(q, s))
     except Exception as e:

@@ -30,6 +30,17 @@ log = logging.getLogger("avia.pipeline")
 # Общий SearchGuard на процесс (модульный объект для тестов с подменой)
 guard = SearchGuard()
 
+
+def configure(settings: Settings) -> SearchGuard:
+    """Пересоздаёт общий guard с параметрами из настроек (GUARD_* в .env)."""
+    global guard
+    guard = SearchGuard(
+        min_interval=settings.guard_min_interval,
+        cache_ttl=settings.guard_cache_ttl,
+        site_concurrency=settings.guard_site_concurrency,
+    )
+    return guard
+
 # Пауза перед повторной попыткой при 0 вариантов (ParserEmptyError)
 EMPTY_RETRY_DELAY: float = 3.0
 
@@ -354,8 +365,8 @@ async def search(
     guard: SearchGuard | None = None,
 ) -> list[SiteResult]:
     sites = [s for s in settings.sites if s.enabled]
-    # браузеры тяжёлые: не больше 2 одновременно (api-источники это не касается, но их мало)
-    sem = asyncio.Semaphore(2)
+    # браузеры и телефоны тяжёлые: по умолчанию не больше 2 сайтов одновременно (SITES_PER_SEARCH)
+    sem = asyncio.Semaphore(max(1, settings.sites_per_search))
     g = guard if guard is not None else globals()["guard"]
 
     async def guarded(s: SiteConfig) -> SiteResult:
