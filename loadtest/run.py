@@ -151,6 +151,7 @@ async def _scenario(args: argparse.Namespace, clock: vclock.VirtualClock) -> dic
             res = await orig_search(q, s, **kw)
             searches.append({
                 "kind": _kind.get(), "t0": t0, "t1": loop.time(), "rt": q.return_date is not None,
+                "key": (q.origin, q.destination, q.depart.isoformat(), q.return_date.isoformat() if q.return_date else None),
                 "sites": [(r.site, r.ok, len(r.offers), r.cached, round(r.elapsed, 1), r.partial, (r.error or "")[:40])
                           for r in res],
             })
@@ -249,7 +250,7 @@ def _report(args: argparse.Namespace, records: list[SearchRecord], searches: lis
             c["partial"] += int(bool(partial))
             c["elapsed_sum"] += el
     outcomes = Counter(r.outcome for r in records)
-    sched_intervals: dict[Any, list[float]] = defaultdict(list)
+    subs = _subscription_stats(bot.s.storage_dir / "subscriptions.sqlite")
     return {
         "scenario": args.scenario, "users": args.users, "phones": args.phones, "ideal": args.ideal,
         "sites_auto": args.sites_auto, "max_parallel": args.max_parallel, "seed": args.seed,
@@ -259,7 +260,8 @@ def _report(args: argparse.Namespace, records: list[SearchRecord], searches: lis
         "wait_over": {f">{m}min": sum(1 for x in lat if x > m * 60) for m in (2, 5, 15, 60)},
         "first_response": {"p50": pct(first, 50), "p95": pct(first, 95), "max": pct(first, 100)},
         "dialog_step": {"p50": pct(steps, 50), "p95": pct(steps, 95), "max": pct(steps, 100)},
-        "tracked": sum(r.tracked for r in records),
+        "tracked": subs.get("total", 0),
+        "subscriptions": subs,
         "pipeline_searches": {"user": len(user_s), "scheduler": len(sched_s)},
         "search_wall": {"p50": pct([s["t1"] - s["t0"] for s in user_s], 50),
                         "p95": pct([s["t1"] - s["t0"] for s in user_s], 95)},
@@ -276,10 +278,49 @@ def _report(args: argparse.Namespace, records: list[SearchRecord], searches: lis
         "state_sizes": {"sessions": len(bot.dialog.sessions), "result_store": len(bot.store._data),
                         "guard_cache": len(pipeline.guard._cache)},
         "log": dict(logc.counts.most_common(12)),
-        "sched_intervals": {str(k): v for k, v in sched_intervals.items()},
+        "sched_intervals": _poll_lag(sched_s, args.hours),
         "examples": [asdict(r) for r in records[:3]],
         "scheduler_checks": _sched_checks(sched_s),
     }
+
+
+def _subscription_stats(path: Path) -> dict[str, int]:
+    """Сколько подписок создали виртуальные люди и сколько у них разных групп (маршрут + даты)."""
+    import sqlite3
+
+    if not path.exists():
+        return {}
+    with sqlite3.connect(path) as db:
+        total, active, groups = db.execute(
+            "SELECT COUNT(*), COALESCE(SUM(active), 0), "
+            "COUNT(DISTINCT origin || destination || depart || COALESCE(return_date, '')) FROM subscriptions"
+        ).fetchone()
+    return {"total": total, "active": active, "groups": groups}
+
+
+def _poll_lag(sched_s: list[dict[str, Any]], hours: float) -> dict[str, Any]:
+    """Насколько реальный интервал опроса группы подписок больше обещанного poll_interval_seconds."""
+    from avia.subscriptions import poll_interval_seconds
+
+    by_key: dict[Any, list[float]] = defaultdict(list)
+    for s in sched_s:
+        by_key[tuple(s["key"])].append(s["t0"])
+    ratios: list[float] = []
+    gaps_min: list[float] = []
+    for key, ts in by_key.items():
+        ts.sort()
+        gaps = [b - a for a, b in zip(ts, ts[1:])]
+        if not gaps:
+            continue
+        nominal = poll_interval_seconds(date.fromisoformat(key[2]), TODAY)
+        median_gap = statistics.median(gaps)
+        ratios.append(median_gap / nominal)
+        gaps_min.append(max(gaps) / 60)
+    if not ratios:
+        return {"groups_polled": len(by_key)}
+    return {"groups_polled": len(by_key), "groups_with_gaps": len(ratios),
+            "gap_to_nominal_p50": round(pct(ratios, 50), 2), "gap_to_nominal_p95": round(pct(ratios, 95), 2),
+            "max_gap_min_p95": round(pct(gaps_min, 95), 1)}
 
 
 def _sched_checks(sched_s: list[dict[str, Any]]) -> dict[str, Any]:
