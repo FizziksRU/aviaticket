@@ -331,6 +331,7 @@ async def _run_site(
             elapsed=time.monotonic() - t0,
             partial=False,
             cached=False,
+            empty=True,
         )
     except Exception as e:
         log.exception("Ошибка при поиске на сайте %s: %s", site.name, e)

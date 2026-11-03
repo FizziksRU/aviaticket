@@ -165,7 +165,8 @@ class Bot:
         q = req.query
         baggage_mode = req.baggage_mode
         wait_msg_id = None
-        useful = False
+        useful = False      # хотя бы один сайт ответил (пусть и «рейсов нет»)
+        delivered = False   # хотя бы один кусок выдачи дошёл до человека
         try:
             wait_msg = await self.send(
                 chat_id,
@@ -176,7 +177,7 @@ class Bot:
 
             async with self._search_sem:
                 results = await search(q, self.s)
-            useful = any(r.ok for r in results)
+            useful = any(r.ok or r.empty for r in results)
             results = assign_ids(results)
             try:
                 await asyncio.to_thread(self.history.annotate, q, results)
@@ -216,6 +217,7 @@ class Bot:
             for i, chunk in enumerate(chunks):
                 rm = reply_markup if i == len(chunks) - 1 else None
                 await self.send(chat_id, chunk, reply_markup=rm)
+                delivered = True
         except Exception as e:
             log.exception("search failed")
             self.dialog.search_finished(chat_id, req.dialog_id)
@@ -225,8 +227,8 @@ class Bot:
                 log.exception("не удалось сообщить об ошибке поиска")
         finally:
             self.busy.discard(chat_id)
-            if charged and not useful:
-                # ни один сайт не ответил или поиск упал: попытку не засчитываем
+            if charged and not (useful and delivered):
+                # ни один сайт не ответил, поиск упал или выдача не дошла: попытку не засчитываем
                 try:
                     self.users.refund_search(chat_id)
                 except Exception:
@@ -350,10 +352,14 @@ class Bot:
                     answer_text = item.answer
                     break
 
-            if answer_text:
-                await self.call("answerCallbackQuery", callback_query_id=cq_id, text=answer_text)
-            else:
-                await self.call("answerCallbackQuery", callback_query_id=cq_id)
+            try:
+                if answer_text:
+                    await self.call("answerCallbackQuery", callback_query_id=cq_id, text=answer_text)
+                else:
+                    await self.call("answerCallbackQuery", callback_query_id=cq_id)
+            except Exception:
+                # «query is too old» или 429: кнопка уже нажата, состояние диалога сменилось — действие выполняем
+                log.warning("answerCallbackQuery не прошёл, выполняю действие без ответа", exc_info=True)
             answered = True
 
             await self._process_actions(chat_id, actions, message_id=message_id)
@@ -444,14 +450,25 @@ def main():
 
 
 async def _serve(bot: Bot) -> None:
-    # SIGTERM (systemd, docker stop) ведёт себя как Ctrl+C: отмена и аккуратная остановка
+    # SIGTERM (systemd, docker stop) ведёт себя как Ctrl+C: отмена и аккуратная остановка с кодом 0
     task = asyncio.current_task()
-    if task is not None:
-        try:
-            asyncio.get_running_loop().add_signal_handler(signal.SIGTERM, task.cancel)
-        except (NotImplementedError, RuntimeError):
-            pass
-    await bot.run()
+    stopping = asyncio.Event()
+
+    def on_sigterm() -> None:
+        stopping.set()
+        if task is not None:
+            task.cancel()
+
+    try:
+        asyncio.get_running_loop().add_signal_handler(signal.SIGTERM, on_sigterm)
+    except (NotImplementedError, RuntimeError):
+        pass
+    try:
+        await bot.run()
+    except asyncio.CancelledError:
+        if not stopping.is_set():
+            raise
+        log.info("остановлен по SIGTERM")
 
 
 if __name__ == "__main__":

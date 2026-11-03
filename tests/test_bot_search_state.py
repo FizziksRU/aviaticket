@@ -205,3 +205,68 @@ async def test_shutdown_waits_for_running_handlers_then_cancels_the_rest(tmp_pat
     assert finished == ["quick"]
     assert hung.cancelled()
     assert bot.http.is_closed
+
+
+@pytest.mark.asyncio
+async def test_no_flights_page_is_charged_like_a_normal_search(tmp_path, monkeypatch):
+    async def no_flights(q, s):
+        return [SiteResult(site="kupibilet", ok=False, offers=[], error="0 вариантов", empty=True)]
+
+    monkeypatch.setattr(bot_mod, "search", no_flights)
+    bot = make_bot(tmp_path)
+    await bot._run_search(USER, SearchRequest(query=Q))
+    assert search_count(bot) == 1
+
+
+@pytest.mark.asyncio
+async def test_quota_is_refunded_when_results_were_not_delivered(tmp_path, monkeypatch):
+    async def fine(q, s):
+        return ok_result()
+
+    monkeypatch.setattr(bot_mod, "search", fine)
+    bot = make_bot(tmp_path)
+    bot.fail_send_after = 1
+    await bot._run_search(USER, SearchRequest(query=Q))
+    assert search_count(bot) == 0
+
+
+@pytest.mark.asyncio
+async def test_failed_callback_answer_still_runs_the_action(tmp_path, monkeypatch):
+    started: list[str] = []
+
+    async def fine(q, s):
+        started.append("search")
+        return ok_result()
+
+    monkeypatch.setattr(bot_mod, "search", fine)
+
+    class StaleCallbackBot(RecordingBot):
+        async def call(self, method, **params):
+            if method == "answerCallbackQuery":
+                raise RuntimeError("Telegram API error: query is too old")
+            return await super().call(method, **params)
+
+    bot = StaleCallbackBot(Settings(sites=[], tg_token="t", tg_allowed_ids={ADMIN}, storage_dir=tmp_path))
+    session = searching_session("aaaa")
+    session.step = Step.BAGGAGE
+    bot.dialog.sessions[ADMIN] = session
+    await bot.handle_callback({"id": "1", "from": {"id": ADMIN}, "data": "bag:aaaa:any",
+                               "message": {"chat": {"id": ADMIN}, "message_id": 5}})
+    assert started == ["search"]
+    assert bot.dialog.sessions[ADMIN].step == Step.DONE
+
+
+@pytest.mark.asyncio
+async def test_sigterm_stops_cleanly(monkeypatch):
+    handlers = {}
+    loop = asyncio.get_running_loop()
+    monkeypatch.setattr(loop, "add_signal_handler", lambda sig, cb: handlers.setdefault(sig, cb))
+
+    class Forever:
+        async def run(self):
+            await asyncio.Event().wait()
+
+    task = asyncio.create_task(bot_mod._serve(Forever()))
+    await asyncio.sleep(0)
+    handlers[bot_mod.signal.SIGTERM]()
+    assert await task is None
