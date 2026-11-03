@@ -1,6 +1,7 @@
 """Здоровье источников: учёт исходов, сигнал о сломанном сайте, /status и алерт админам."""
 from __future__ import annotations
 
+import asyncio
 from datetime import date
 
 import pytest
@@ -33,6 +34,24 @@ def test_site_is_reported_broken_once_after_three_failures_in_row():
     h.record([ok("ozon_travel")])
     assert h.failures_in_row("ozon_travel") == 0
     assert [h.record([fail()]) for _ in range(3)][-1] == ["ozon_travel"]
+
+
+def test_no_flights_on_every_site_is_not_a_parser_failure():
+    h = Health()
+    no_flights = [SiteResult(site=s, ok=False, offers=[], error="0 вариантов", empty=True) for s in ("a", "b")]
+    for _ in range(5):
+        assert h.record(no_flights) == []
+    assert h.stats() == [] and h.counters["empty_routes"] == 10
+    # пусто только у одного сайта, а другие нашли варианты: это сигнал поломки
+    one_empty = [ok("a"), SiteResult(site="b", ok=False, offers=[], error="0 вариантов", empty=True)]
+    assert [h.record(one_empty) for _ in range(3)][-1] == ["b"]
+
+
+def test_scheduler_searches_do_not_skew_time_to_result():
+    h = Health()
+    h.record([ok()], kind="user", seconds=10)
+    h.record([ok()], kind="scheduler", seconds=None)
+    assert h.search_percentiles() == (10.0, 10.0)
 
 
 def test_cache_hits_and_unsupported_requests_are_not_failures():
@@ -84,6 +103,7 @@ async def test_admins_get_alert_only_when_enabled(tmp_path, monkeypatch, alerts)
     bot = make_bot(tmp_path, alerts)
     for _ in range(3):
         await bot._scheduler_search(Q)
+    await asyncio.gather(*bot._alerts)
     to_admin = [text for chat, text in bot.sent if chat == ADMIN]
     assert bool(to_admin) is alerts
     if alerts:
