@@ -65,3 +65,5 @@ class SiteResult:
     elapsed: float = 0.0
     partial: bool = False
     cached: bool = False
+    # сайт ответил страницей, но парсер нашёл 0 вариантов: «рейсов нет» или поменялся формат
+    empty: bool = False
