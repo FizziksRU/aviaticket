@@ -29,6 +29,9 @@ class SiteConfig:
     url_template_rt: str = ""
     # replay_post: конфигурация повтора POST-запроса {"url_contains": "...", "set": {...}}
     replay_post: dict | None = None
+    phone: str = ""
+    phone_capture_json: list[str] = field(default_factory=list)
+    phone_wait_seconds: int = 40
 
 
 @dataclass
@@ -36,6 +39,8 @@ class Settings:
     sites: list[SiteConfig]
     tp_token: str = ""            # Travelpayouts API token
     tp_marker: str = ""           # партнёрский marker для ссылок
+    droidhub_url: str = ""        # адрес сервиса droidhub (HTTP API)
+    droidhub_token: str = ""      # токен авторизации droidhub
     # llm_backend нужен только сайтам с use_llm: true
     # "agy_ssh" (аккаунт пула на VPS через SSH) или "gemini_local" (локальный gemini CLI)
     llm_backend: str = "gemini_local"
@@ -72,6 +77,8 @@ def load_settings(path: Path | None = None) -> Settings:
         sites=sites,
         tp_token=os.getenv("TP_TOKEN", ""),
         tp_marker=os.getenv("TP_MARKER", ""),
+        droidhub_url=os.getenv("DROIDHUB_URL", ""),
+        droidhub_token=os.getenv("DROIDHUB_TOKEN", ""),
         llm_backend=os.getenv("LLM_BACKEND", "gemini_local"),
         gemini_cmd=os.getenv("GEMINI_CMD", "gemini"),
         gemini_model=os.getenv("GEMINI_MODEL") or None,

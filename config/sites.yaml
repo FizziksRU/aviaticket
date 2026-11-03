@@ -3,6 +3,7 @@
 # source: api      HTTP-клиент без браузера (parser = имя клиента)
 # source: browser  Playwright открывает url_template, дальше парсер из src/avia/parsers/
 #                  (parser: имя) или, если use_llm: true, разбор через LLM
+# phone:           id телефона для droidhub (если задан и настроен droidhub, сбор идёт через телефон)
 #
 # Плейсхолдеры в url_template: {origin} {destination} {date_iso} {ddmm} {ddmmyyyy} {adults}
 # Коды городов IATA (MOW, ALA, TAS, MSQ, EVN ...).
@@ -22,6 +23,9 @@ sites:
     source: browser
     parser: aviasales
     enabled: true
+    phone: realme
+    phone_capture_json: ["/search/v3.2/results"]
+    phone_wait_seconds: 40
     url_template: "https://www.aviasales.ru/search/{origin}{ddmm}{destination}{adults}"
     url_template_rt: "https://www.aviasales.ru/search/{origin}{ddmm}{destination}{ddmm_ret}{adults}"
     settle_ms: 25000

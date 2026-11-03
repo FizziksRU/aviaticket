@@ -10,6 +10,7 @@ import time
 
 from .collector import fetch_snapshot, Snapshot
 from .config import Settings, SiteConfig
+from .droidhub import DroidhubError, fetch_page_snapshot, phone_enabled
 from .extract import extract_offers
 from .guard import SearchGuard, friendly_error
 from .models import Offer, Query, SiteResult
@@ -66,6 +67,8 @@ def _save_empty_snapshot(
             content = content.replace(settings.tp_token, "[REDACTED]")
         if settings.tg_token:
             content = content.replace(settings.tg_token, "[REDACTED]")
+        if settings.droidhub_token:
+            content = content.replace(settings.droidhub_token, "[REDACTED]")
         content = re.sub(
             r'([?&](?:token|access_token|api_key|key|secret)=)[^&"\s]+',
             r'\1[REDACTED]',
@@ -139,21 +142,16 @@ async def resolve_extra(site: SiteConfig, q: Query) -> dict[str, str] | None:
     return extra
 
 
-async def _from_browser(site: SiteConfig, q: Query, settings: Settings) -> tuple[list[Offer], str | None, bool]:
-    extra = await resolve_extra(site, q)
-    url = build_url(site, q, extra=extra)
-    snap = await fetch_snapshot(
-        url,
-        site,
-        headless=settings.headless,
-        profile_dir=settings.storage_dir / "profiles" / site.name,
-        debug_dir=settings.debug_dir,
-    )
-    if snap.blocked:
-        raise RuntimeError("сайт показал капчу или блокировку")
-
+async def _process_snapshot(
+    site: SiteConfig,
+    snap: Snapshot,
+    q: Query,
+    settings: Settings,
+    *,
+    partial: bool = False,
+) -> tuple[list[Offer], str | None, bool]:
+    """Разбор полученного снимка страницы: парсер, результаты, даты и сортировка."""
     offers: list[Offer] = []
-    partial = False
     parser = PARSERS.get(site.parser)
     if site.parser and parser is None:
         raise RuntimeError(f"парсер {site.parser!r} не зарегистрирован")
@@ -206,6 +204,36 @@ async def _from_browser(site: SiteConfig, q: Query, settings: Settings) -> tuple
         o.url_is_direct = bool(o.url and o.url != snap.url)
         o.url = o.url or snap.url
     return sorted(offers, key=lambda o: o.price), snap.url, partial
+
+
+async def _from_browser(site: SiteConfig, q: Query, settings: Settings) -> tuple[list[Offer], str | None, bool]:
+    extra = await resolve_extra(site, q)
+    url = build_url(site, q, extra=extra)
+
+    if phone_enabled(settings, site):
+        snap, finished = await fetch_page_snapshot(
+            settings,
+            site.phone,
+            url,
+            wait_seconds=site.phone_wait_seconds,
+            capture_json=site.phone_capture_json,
+        )
+        if snap.blocked:
+            raise RuntimeError("сайт показал капчу на телефоне")
+        partial = not finished
+    else:
+        snap = await fetch_snapshot(
+            url,
+            site,
+            headless=settings.headless,
+            profile_dir=settings.storage_dir / "profiles" / site.name,
+            debug_dir=settings.debug_dir,
+        )
+        if snap.blocked:
+            raise RuntimeError("сайт показал капчу или блокировку")
+        partial = False
+
+    return await _process_snapshot(site, snap, q, settings, partial=partial)
 
 
 async def _fallback_url(site: SiteConfig, q: Query, settings: Settings) -> str | None:
@@ -273,6 +301,18 @@ async def _run_site(
             elapsed=time.monotonic() - t0,
             partial=partial,
             cached=from_cache,
+        )
+    except DroidhubError as e:
+        log.warning("Ошибка droidhub на сайте %s: %s", site.name, e)
+        return SiteResult(
+            site=site.name,
+            ok=False,
+            offers=[],
+            error=str(e),
+            page_url=await _fallback_url(site, q, settings),
+            elapsed=time.monotonic() - t0,
+            partial=False,
+            cached=False,
         )
     except ParserEmptyError as e:
         log.warning("Парсер сайта %s вернул 0 вариантов: %s", site.name, e)
