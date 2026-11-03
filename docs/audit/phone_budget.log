@@ -41,3 +41,19 @@ ts_utc	kind	device	site	route	note
 2026-11-03T20:20:36Z	mcp_fetch_page	realme	onetwotrip	rt	phase2 max_chars=3000
 2026-11-03T20:20:36Z	mcp_fetch_page	redmi	onetwotrip	rt	phase2 max_chars=3000
 2026-11-03T20:22:57Z	mcp_fetch_page	realme	yandex_travel	near	phase2 wait_for cont:null probe
+2026-11-03T21:00:39Z	mcp_fetch_page	realme	kupibilet	near	degrade #1 max_chars=3000
+2026-11-03T21:00:39Z	mcp_fetch_page	redmi	tutu	near	degrade #1 max_chars=3000
+2026-11-03T21:01:31Z	mcp_fetch_page	realme	kupibilet	near	degrade #2
+2026-11-03T21:01:31Z	mcp_fetch_page	redmi	tutu	near	degrade #2
+2026-11-03T21:04:48Z	mcp_fetch_page	realme	kupibilet	near	degrade #3
+2026-11-03T21:04:48Z	mcp_fetch_page	redmi	tutu	near	degrade #3
+2026-11-03T21:05:41Z	mcp_fetch_page	realme	kupibilet	near	degrade #4
+2026-11-03T21:05:41Z	mcp_fetch_page	redmi	tutu	near	degrade #4
+2026-11-03T21:06:19Z	mcp_fetch_page	realme	kupibilet	near	degrade #5
+2026-11-03T21:06:19Z	mcp_fetch_page	redmi	tutu	near	degrade #5
+2026-11-03T21:08:19Z	mcp_fetch_page	realme	kupibilet	near	degrade #6
+2026-11-03T21:08:19Z	mcp_fetch_page	redmi	tutu	near	degrade #6
+2026-11-03T21:09:01Z	mcp_fetch_page	redmi	aviasales	near	pair check #1
+2026-11-03T21:09:02Z	mcp_fetch_page	realme	ozon_travel	near	pair check #1
+2026-11-03T21:10:15Z	mcp_fetch_page	redmi	aviasales	near	pair check #2
+2026-11-03T21:10:15Z	mcp_fetch_page	realme	ozon_travel	near	pair check #2
