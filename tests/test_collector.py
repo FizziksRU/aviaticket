@@ -745,10 +745,13 @@ async def test_fetch_snapshot_large_results_with_last_update_zero(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_recon_profile_dir_and_blocked_message(monkeypatch, capsys):
+async def test_recon_profile_dir_and_blocked_message(monkeypatch, capsys, tmp_path):
     """recon.py передает правильный profile_dir и выводит понятную подсказку при blocked=True."""
     from avia import recon
-    from avia.config import ROOT, Settings, SiteConfig
+    from avia.config import Settings, SiteConfig
+
+    ROOT = tmp_path  # recon пишет в ROOT/debug/recon: в тестах — во временную папку, а не в репозиторий
+    monkeypatch.setattr(recon, "ROOT", ROOT)
 
     captured_kwargs = {}
 
