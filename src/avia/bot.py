@@ -27,7 +27,9 @@ from .formatting import build_compact_report, build_report, format_details
 from .guard import friendly_error
 from .history import PriceHistory
 from .offers import assign_ids, filter_by_baggage
+from . import pipeline as pipeline_mod
 from .pipeline import search
+from .queueing import BACKGROUND, INTERACTIVE, PrioritySlots
 from .scheduler import Scheduler
 from .store import ResultStore
 from .subscriptions import SubscriptionStore
@@ -63,7 +65,8 @@ class Bot:
         self._tasks: set[asyncio.Task] = set()
         self._scheduler_task: asyncio.Task | None = None
         self.users = UserStore(settings.storage_dir / "users.sqlite")
-        self._search_sem = asyncio.Semaphore(settings.max_parallel_searches)
+        # общая очередь поисков людей и планировщика; SEARCH_PRIORITY=1 ставит людей вперёд
+        self._search_sem = PrioritySlots(settings.max_parallel_searches)
         self.history = PriceHistory(settings.storage_dir / "history.sqlite")
         if dialog is not None:
             self.dialog = dialog
@@ -174,7 +177,8 @@ class Bot:
             if isinstance(wait_msg, dict):
                 wait_msg_id = wait_msg.get("message_id")
 
-            async with self._search_sem:
+            on_wait = self._queue_notice(chat_id, wait_msg_id, q) if self.s.queue_notice else None
+            async with self._search_sem.slot(INTERACTIVE, on_wait=on_wait):
                 results = await search(q, self.s)
             useful = any(r.ok for r in results)
             results = assign_ids(results)
@@ -364,9 +368,28 @@ class Bot:
                 except Exception:
                     pass
 
+    def _queue_notice(self, chat_id: int, wait_msg_id: int | None, q):
+        """Колбэк очереди: показать человеку его место и примерное ожидание вместо «около минуты»."""
+
+        async def notice(position: int) -> None:
+            if wait_msg_id is None:
+                return
+            minutes = max(1, round((self._search_sem.eta_seconds(position) + self._search_sem.eta_seconds(1)) / 60))
+            text = (
+                f"Вы {position}-й в очереди, примерно {minutes} мин. "
+                f"Потом ищу {q.origin} → {q.destination} на {q.depart:%d.%m}…"
+            )
+            try:
+                await self.call("editMessageText", chat_id=chat_id, message_id=wait_msg_id, text=text)
+            except Exception:
+                log.debug("не удалось показать место в очереди", exc_info=True)
+
+        return notice
+
     async def _scheduler_search(self, q):
         # телефоны общие: фоновый опрос стоит в той же очереди, что и поиски людей
-        async with self._search_sem:
+        priority = BACKGROUND if self.s.search_priority else INTERACTIVE
+        async with self._search_sem.slot(priority):
             return await search(q, self.s)
 
     async def _scheduler_notify(self, chat_id: int, text: str, reply_markup: dict | None) -> None:
@@ -374,6 +397,7 @@ class Bot:
 
     async def run(self):
         offset = 0
+        pipeline_mod.configure(self.s)
         log.info("bot started")
         if self.subs is not None:
             scheduler = Scheduler(

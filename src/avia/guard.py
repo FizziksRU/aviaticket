@@ -34,7 +34,8 @@ class SearchGuard:
     """Управление надёжностью и частотой запросов к сайтам.
 
     - Кэширование успешных ответов на время cache_ttl (ошибки не кэшируются).
-    - Очередь запросов на сайт (asyncio.Lock) с паузой не менее min_interval между началами поисков.
+    - Очередь запросов на сайт: не больше site_concurrency поисков сайта одновременно (по умолчанию 1)
+      и пауза не менее min_interval между началами поисков.
     - Разные сайты не блокируют друг друга.
     - Схлопывание одновременных одинаковых запросов (второй ждёт первый и берёт результат из кэша).
     - Повтор при сетевой ошибке один раз с паузой retry_delay.
@@ -47,8 +48,10 @@ class SearchGuard:
         clock: Callable[[], float] = time.monotonic,
         sleep: Callable[[float], Awaitable[None] | None] = asyncio.sleep,
         retry_delay: float = 2.0,
+        site_concurrency: int = 1,
     ) -> None:
         self.min_interval = float(min_interval)
+        self.site_concurrency = max(1, int(site_concurrency))
         self.cache_ttl = float(cache_ttl)
         self.clock = clock
         self.sleep = sleep
@@ -56,14 +59,22 @@ class SearchGuard:
 
         self._cache: dict[tuple[str, Hashable], tuple[float, Any]] = {}
         self._inflight: dict[tuple[str, Hashable], _InFlight] = {}
-        self._locks: dict[str, asyncio.Lock] = {}
+        self._locks: dict[str, asyncio.Semaphore] = {}
+        self._start_locks: dict[str, asyncio.Lock] = {}
         self._last_starts: dict[str, float] = {}
 
-    def _get_lock(self, site: str) -> asyncio.Lock:
+    def _get_lock(self, site: str) -> asyncio.Semaphore:
         lock = self._locks.get(site)
         if lock is None:
-            lock = asyncio.Lock()
+            lock = asyncio.Semaphore(self.site_concurrency)
             self._locks[site] = lock
+        return lock
+
+    def _get_start_lock(self, site: str) -> asyncio.Lock:
+        lock = self._start_locks.get(site)
+        if lock is None:
+            lock = asyncio.Lock()
+            self._start_locks[site] = lock
         return lock
 
     async def _do_sleep(self, seconds: float) -> None:
@@ -127,13 +138,13 @@ class SearchGuard:
                     return cached_val, True
 
                 # Выдерживаем min_interval между началами двух реальных поисков одного сайта
-                last_start = self._last_starts.get(key_site)
-                if last_start is not None:
-                    elapsed = self.clock() - last_start
-                    if elapsed < self.min_interval:
-                        await self._do_sleep(self.min_interval - elapsed)
-
-                self._last_starts[key_site] = self.clock()
+                async with self._get_start_lock(key_site):
+                    last_start = self._last_starts.get(key_site)
+                    if last_start is not None:
+                        elapsed = self.clock() - last_start
+                        if elapsed < self.min_interval:
+                            await self._do_sleep(self.min_interval - elapsed)
+                    self._last_starts[key_site] = self.clock()
 
                 # Реальный поиск с одним повтором при сетевой ошибке
                 try:
@@ -161,6 +172,7 @@ class SearchGuard:
         self._inflight.clear()
         self._last_starts.clear()
         self._locks.clear()
+        self._start_locks.clear()
 
 
 def friendly_error(exc: BaseException) -> str:
