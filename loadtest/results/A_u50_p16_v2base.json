@@ -1,0 +1,321 @@
+{
+ "scenario": "A",
+ "users": 50,
+ "phones": 16,
+ "ideal": false,
+ "sites_auto": false,
+ "max_parallel": 0,
+ "seed": 7,
+ "virtual_seconds": 1786,
+ "real_seconds": 157.4,
+ "searches_requested": 50,
+ "outcomes": {
+  "ok": 50
+ },
+ "result_latency": {
+  "p50": 875.6,
+  "p95": 1610.7,
+  "max": 1746.9,
+  "n": 50
+ },
+ "wait_over": {
+  ">2min": 47,
+  ">5min": 42,
+  ">15min": 22,
+  ">60min": 0
+ },
+ "first_response": {
+  "p50": 0.0,
+  "p95": 0.0,
+  "max": 0.0
+ },
+ "dialog_step": {
+  "p50": 0.0,
+  "p95": 0.0,
+  "max": 0.0
+ },
+ "tracked": 0,
+ "pipeline_searches": {
+  "user": 50,
+  "scheduler": 0
+ },
+ "search_wall": {
+  "p50": 62.3,
+  "p95": 167.0
+ },
+ "sites": {
+  "aviasales": {
+   "n": 50,
+   "ok": 48,
+   "cached": 16,
+   "partial": 6,
+   "avg_elapsed": 47.1
+  },
+  "kupibilet": {
+   "n": 50,
+   "ok": 50,
+   "cached": 16,
+   "partial": 0,
+   "avg_elapsed": 12.8
+  },
+  "tutu": {
+   "n": 50,
+   "ok": 50,
+   "cached": 16,
+   "partial": 0,
+   "avg_elapsed": 10.7
+  },
+  "yandex_travel": {
+   "n": 50,
+   "ok": 49,
+   "cached": 16,
+   "partial": 7,
+   "avg_elapsed": 10.5
+  },
+  "onetwotrip": {
+   "n": 50,
+   "ok": 42,
+   "cached": 16,
+   "partial": 0,
+   "avg_elapsed": 21.5
+  },
+  "ozon_travel": {
+   "n": 50,
+   "ok": 44,
+   "cached": 13,
+   "partial": 0,
+   "avg_elapsed": 20.4
+  }
+ },
+ "phones_util": {
+  "realme": 0.738,
+  "redmi": 0.145,
+  "phone3": 0.069,
+  "phone4": 0.064,
+  "phone5": 0.105,
+  "phone6": 0.111,
+  "phone7": 0.124,
+  "phone8": 0.098,
+  "phone9": 0.119,
+  "phone10": 0.11,
+  "phone11": 0.026,
+  "phone12": 0.061,
+  "phone13": 0.097,
+  "phone14": 0.076,
+  "phone15": 0.09,
+  "phone16": 0.081
+ },
+ "phone_requests": {
+  "realme": 116,
+  "redmi": 11,
+  "phone3": 7,
+  "phone4": 9,
+  "phone5": 7,
+  "phone6": 9,
+  "phone7": 9,
+  "phone8": 9,
+  "phone9": 8,
+  "phone10": 9,
+  "phone11": 2,
+  "phone12": 8,
+  "phone13": 7,
+  "phone14": 9,
+  "phone15": 7,
+  "phone16": 7
+ },
+ "phone_by_site": {
+  "realme": {
+   "aviasales": 2,
+   "tutu": 34,
+   "yandex_travel": 36,
+   "onetwotrip": 42,
+   "ozon_travel": 1,
+   "kupibilet": 1
+  },
+  "redmi": {
+   "kupibilet": 3,
+   "aviasales": 5,
+   "ozon_travel": 3
+  },
+  "phone3": {
+   "kupibilet": 3,
+   "aviasales": 3,
+   "ozon_travel": 1
+  },
+  "phone4": {
+   "ozon_travel": 6,
+   "kupibilet": 2,
+   "aviasales": 1
+  },
+  "phone5": {
+   "aviasales": 3,
+   "ozon_travel": 3,
+   "kupibilet": 1
+  },
+  "phone6": {
+   "ozon_travel": 3,
+   "aviasales": 4,
+   "kupibilet": 2
+  },
+  "phone7": {
+   "aviasales": 4,
+   "kupibilet": 3,
+   "ozon_travel": 2
+  },
+  "phone8": {
+   "kupibilet": 4,
+   "aviasales": 2,
+   "ozon_travel": 3
+  },
+  "phone9": {
+   "kupibilet": 2,
+   "ozon_travel": 5,
+   "aviasales": 1
+  },
+  "phone10": {
+   "ozon_travel": 4,
+   "aviasales": 3,
+   "kupibilet": 2
+  },
+  "phone11": {
+   "kupibilet": 1,
+   "aviasales": 1
+  },
+  "phone12": {
+   "ozon_travel": 4,
+   "aviasales": 1,
+   "kupibilet": 3
+  },
+  "phone13": {
+   "aviasales": 5,
+   "ozon_travel": 2
+  },
+  "phone14": {
+   "kupibilet": 4,
+   "ozon_travel": 4,
+   "aviasales": 1
+  },
+  "phone15": {
+   "kupibilet": 2,
+   "ozon_travel": 2,
+   "aviasales": 3
+  },
+  "phone16": {
+   "ozon_travel": 4,
+   "kupibilet": 1,
+   "aviasales": 2
+  }
+ },
+ "phone_outcomes": {
+  "ok": 190,
+  "miss": 44
+ },
+ "telegram": {
+  "stats": {
+   "getUpdates": 393,
+   "sendMessage": 408,
+   "answerCallbackQuery": 150,
+   "deleteMessage": 50
+  },
+  "errors": [],
+  "n_errors": 0
+ },
+ "memory": {
+  "start_mb": 0.0,
+  "end_mb": 50.6,
+  "peak_mb": 89.8,
+  "samples_mb": [
+   [
+    0,
+    0.2
+   ],
+   [
+    600,
+    21.3
+   ],
+   [
+    1200,
+    40.0
+   ]
+  ]
+ },
+ "state_sizes": {
+  "sessions": 50,
+  "result_store": 50,
+  "guard_cache": 137
+ },
+ "log": {
+  "WARNING avia.pipeline: Сайт ozon_travel вернул 0 вариантов (формат выдачи мог измениться, 0 в": 10,
+  "WARNING avia.pipeline: Сайт onetwotrip вернул 0 вариантов (формат выдачи мог измениться, 0 ва": 8,
+  "WARNING avia.pipeline: Парсер сайта onetwotrip вернул 0 вариантов: формат выдачи мог изменить": 8,
+  "WARNING avia.pipeline: Сайт aviasales вернул 0 вариантов (формат выдачи мог измениться, 0 вар": 7,
+  "WARNING avia.pipeline: Парсер сайта ozon_travel вернул 0 вариантов: формат выдачи мог изменит": 6,
+  "WARNING avia.pipeline: Сайт yandex_travel вернул 0 вариантов (формат выдачи мог измениться, 0": 2,
+  "WARNING avia.pipeline: Парсер сайта aviasales вернул 0 вариантов: формат выдачи мог изменитьс": 2,
+  "WARNING avia.pipeline: Парсер сайта yandex_travel вернул 0 вариантов: формат выдачи мог измен": 1
+ },
+ "sched_intervals": {},
+ "examples": [
+  {
+   "chat_id": 100025,
+   "route": [
+    "2026-11-28",
+    null
+   ],
+   "t_click": 7343.224870311097,
+   "t_result": 7395.077129415469,
+   "outcome": "ok",
+   "step_latencies": [
+    0.00953429099990899,
+    0.008351915999810444,
+    0.005435166000097524,
+    0.005503207999936421,
+    0.010170832999392587,
+    0.006476792000285059
+   ],
+   "tracked": false,
+   "text_head": "✈️ <b>Москва → Санкт-Петербург</b>, 28.11.2026, пассажиров: 1\n\n1. <b>Самый дешёв"
+  },
+  {
+   "chat_id": 100039,
+   "route": [
+    "2026-11-28",
+    null
+   ],
+   "t_click": 7343.903862510612,
+   "t_result": 7395.31840058247,
+   "outcome": "ok",
+   "step_latencies": [
+    0.009293209000134084,
+    0.007566416999907233,
+    0.004701584000031289,
+    0.005487541000547935,
+    0.006420166999305366,
+    0.008758499999203195
+   ],
+   "tracked": false,
+   "text_head": "✈️ <b>Москва → Санкт-Петербург</b>, 28.11.2026, пассажиров: 1\n\n1. <b>Самый дешёв"
+  },
+  {
+   "chat_id": 100030,
+   "route": [
+    "2026-12-20",
+    null
+   ],
+   "t_click": 7346.043319296406,
+   "t_result": 7431.49145838997,
+   "outcome": "ok",
+   "step_latencies": [
+    0.007141916999898967,
+    0.006105999999817868,
+    0.0048432079993290245,
+    0.020013165999444027,
+    0.00467262500023935,
+    0.006175458000143408
+   ],
+   "tracked": false,
+   "text_head": "✈️ <b>Москва → Санкт-Петербург</b>, 20.12.2026, пассажиров: 1\n\n1. <b>Самый дешёв"
+  }
+ ],
+ "scheduler_checks": {}
+}

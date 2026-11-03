@@ -1,0 +1,286 @@
+{
+ "scenario": "C",
+ "users": 50,
+ "phones": 4,
+ "ideal": false,
+ "sites_auto": false,
+ "max_parallel": 0,
+ "seed": 7,
+ "virtual_seconds": 86964,
+ "real_seconds": 2947.9,
+ "searches_requested": 463,
+ "outcomes": {
+  "ok": 368,
+  "refused": 95
+ },
+ "result_latency": {
+  "p50": 106.6,
+  "p95": 238.4,
+  "max": 474.0,
+  "n": 368
+ },
+ "wait_over": {
+  ">2min": 149,
+  ">5min": 6,
+  ">15min": 0,
+  ">60min": 0
+ },
+ "first_response": {
+  "p50": 0.0,
+  "p95": 0.0,
+  "max": 0.3
+ },
+ "dialog_step": {
+  "p50": 0.0,
+  "p95": 0.0,
+  "max": 1.1
+ },
+ "tracked": 0,
+ "pipeline_searches": {
+  "user": 368,
+  "scheduler": 385
+ },
+ "search_wall": {
+  "p50": 95.6,
+  "p95": 175.3
+ },
+ "sites": {
+  "aviasales": {
+   "n": 753,
+   "ok": 613,
+   "cached": 92,
+   "partial": 94,
+   "avg_elapsed": 60.2
+  },
+  "kupibilet": {
+   "n": 753,
+   "ok": 753,
+   "cached": 96,
+   "partial": 0,
+   "avg_elapsed": 12.2
+  },
+  "tutu": {
+   "n": 753,
+   "ok": 753,
+   "cached": 100,
+   "partial": 0,
+   "avg_elapsed": 13.2
+  },
+  "yandex_travel": {
+   "n": 753,
+   "ok": 712,
+   "cached": 100,
+   "partial": 103,
+   "avg_elapsed": 15.1
+  },
+  "onetwotrip": {
+   "n": 753,
+   "ok": 609,
+   "cached": 98,
+   "partial": 0,
+   "avg_elapsed": 23.1
+  },
+  "ozon_travel": {
+   "n": 753,
+   "ok": 606,
+   "cached": 90,
+   "partial": 0,
+   "avg_elapsed": 27.9
+  }
+ },
+ "phones_util": {
+  "realme": 0.374,
+  "redmi": 0.206,
+  "phone3": 0.187,
+  "phone4": 0.162
+ },
+ "phone_requests": {
+  "realme": 2546,
+  "redmi": 764,
+  "phone3": 683,
+  "phone4": 666
+ },
+ "phone_by_site": {
+  "realme": {
+   "aviasales": 166,
+   "tutu": 654,
+   "yandex_travel": 726,
+   "onetwotrip": 798,
+   "ozon_travel": 143,
+   "kupibilet": 59
+  },
+  "redmi": {
+   "kupibilet": 223,
+   "ozon_travel": 257,
+   "aviasales": 284
+  },
+  "phone3": {
+   "aviasales": 237,
+   "kupibilet": 174,
+   "ozon_travel": 272
+  },
+  "phone4": {
+   "kupibilet": 202,
+   "ozon_travel": 259,
+   "aviasales": 205
+  }
+ },
+ "phone_outcomes": {
+  "ok": 3474,
+  "miss": 1183
+ },
+ "telegram": {
+  "stats": {
+   "getUpdates": 4689,
+   "sendMessage": 3733,
+   "answerCallbackQuery": 1439,
+   "deleteMessage": 368
+  },
+  "errors": [],
+  "n_errors": 0
+ },
+ "memory": {
+  "start_mb": 0.0,
+  "end_mb": 148.4,
+  "peak_mb": 190.9,
+  "samples_mb": [
+   [
+    0,
+    0.1
+   ],
+   [
+    7200,
+    0.4
+   ],
+   [
+    14400,
+    0.4
+   ],
+   [
+    21600,
+    0.5
+   ],
+   [
+    28800,
+    0.4
+   ],
+   [
+    36002,
+    43.7
+   ],
+   [
+    43202,
+    78.8
+   ],
+   [
+    50402,
+    105.9
+   ],
+   [
+    57603,
+    124.7
+   ],
+   [
+    64809,
+    138.4
+   ],
+   [
+    72009,
+    142.1
+   ],
+   [
+    79210,
+    139.9
+   ],
+   [
+    86413,
+    146.4
+   ]
+  ]
+ },
+ "state_sizes": {
+  "sessions": 50,
+  "result_store": 50,
+  "guard_cache": 347
+ },
+ "log": {
+  "WARNING avia.pipeline: Сайт ozon_travel вернул 0 вариантов (формат выдачи мог измениться, 0 в": 270,
+  "WARNING avia.pipeline: Сайт aviasales вернул 0 вариантов (формат выдачи мог измениться, 0 вар": 232,
+  "WARNING avia.pipeline: Парсер сайта ozon_travel вернул 0 вариантов: формат выдачи мог изменит": 147,
+  "WARNING avia.pipeline: Парсер сайта onetwotrip вернул 0 вариантов: формат выдачи мог изменить": 144,
+  "WARNING avia.pipeline: Сайт onetwotrip вернул 0 вариантов (формат выдачи мог измениться, 0 ва": 143,
+  "WARNING avia.pipeline: Парсер сайта aviasales вернул 0 вариантов: формат выдачи мог изменитьс": 140,
+  "WARNING avia.pipeline: Сайт yandex_travel вернул 0 вариантов (формат выдачи мог измениться, 0": 72,
+  "WARNING avia.pipeline: Парсер сайта yandex_travel вернул 0 вариантов: формат выдачи мог измен": 41
+ },
+ "sched_intervals": {},
+ "examples": [
+  {
+   "chat_id": 100010,
+   "route": [
+    "2026-12-20",
+    null
+   ],
+   "t_click": 35075.889046429176,
+   "t_result": 35124.30278382656,
+   "outcome": "ok",
+   "step_latencies": [
+    0.006522499999846332,
+    0.0063743330028955825,
+    0.005001291996450163,
+    0.00584562500444008,
+    0.007701499998802319,
+    0.008784040997852571
+   ],
+   "tracked": false,
+   "text_head": "✈️ <b>Москва → Санкт-Петербург</b>, 20.12.2026, пассажиров: 1\n\n1. <b>Самый дешёв"
+  },
+  {
+   "chat_id": 100040,
+   "route": [
+    "2026-11-22",
+    null
+   ],
+   "t_click": 35154.56203841938,
+   "t_result": 35189.80234660089,
+   "outcome": "ok",
+   "step_latencies": [
+    0.0042312500008847564,
+    0.0052456249977694824,
+    0.003984375005529728,
+    0.004138791999139357,
+    0.009208125004079193,
+    0.007179583997640293
+   ],
+   "tracked": false,
+   "text_head": "✈️ <b>Москва → Санкт-Петербург</b>, 22.11.2026, пассажиров: 1\n\n1. <b>Самый дешёв"
+  },
+  {
+   "chat_id": 100021,
+   "route": [
+    "2026-11-28",
+    null
+   ],
+   "t_click": 35159.14851724749,
+   "t_result": 35234.790828064055,
+   "outcome": "ok",
+   "step_latencies": [
+    0.006018625004799105,
+    0.005802832994959317,
+    0.004055124998558313,
+    0.0042218749949825,
+    0.004816374996153172,
+    0.0051349580025998875
+   ],
+   "tracked": false,
+   "text_head": "✈️ <b>Москва → Санкт-Петербург</b>, 28.11.2026, пассажиров: 1\n\n1. <b>Самый дешёв"
+  }
+ ],
+ "scheduler_checks": {
+  "n": 385,
+  "wall_p50": 73.4,
+  "wall_p95": 172.0,
+  "busy_share": 0.54,
+  "gap_p50": 97.4
+ }
+}

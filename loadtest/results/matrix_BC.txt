@@ -4,3 +4,7 @@ C_u10_p2 {"virtual_seconds": 86400, "real_seconds": 498.7, "outcomes": {"ok": 79
 C_u10_p4 {"virtual_seconds": 86413, "real_seconds": 520.6, "outcomes": {"ok": 79, "refused": 17}, "result_latency": {"p50": 52.3, "p95": 135.0, "max": 193.2, "n": 79}, "first_response": {"p50": 0.0, "
 B_u50_p2 {"virtual_seconds": 86400, "real_seconds": 2212.0, "outcomes": {"ok": 256}, "result_latency": {"p50": 151.3, "p95": 331.7, "max": 559.1, "n": 256}, "first_response": {"p50": 0.0, "p95": 0.0, 
 B_u100_p2 {"virtual_seconds": 86633, "real_seconds": 2332.7, "outcomes": {"ok": 490}, "result_latency": {"p50": 263.2, "p95": 540.3, "max": 652.1, "n": 490}, "first_response": {"p50": 0.0, "p95": 0.0,
+B_u50_p4 {"virtual_seconds": 86400, "real_seconds": 2431.8, "outcomes": {"ok": 256}, "result_latency": {"p50": 97.5, "p95": 220.6, "max": 452.0, "n": 256}, "first_response": {"p50": 0.0, "p95": 0.0, "
+B_u100_p4 {"virtual_seconds": 86482, "real_seconds": 3194.1, "outcomes": {"ok": 490}, "result_latency": {"p50": 133.1, "p95": 283.5, "max": 487.0, "n": 490}, "first_response": {"p50": 0.0, "p95": 0.0,
+C_u50_p2 {"virtual_seconds": 87875, "real_seconds": 2722.4, "outcomes": {"ok": 373, "refused": 90}, "result_latency": {"p50": 165.2, "p95": 353.4, "max": 612.3, "n": 373}, "first_response": {"p50": 0.
+C_u50_p4 {"virtual_seconds": 86964, "real_seconds": 2947.9, "outcomes": {"ok": 368, "refused": 95}, "result_latency": {"p50": 106.6, "p95": 238.4, "max": 474.0, "n": 368}, "first_response": {"p50": 0.

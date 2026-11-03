@@ -1,0 +1,21 @@
+A_u100_p8_v2base {"virtual_seconds": 3944, "real_seconds": 308.2, "outcomes": {"ok": 100}, "result_latency": {"p50": 1781.1, "p95": 3621.5, "max": 3906.1, "n": 
+A_u100_p4_v2base {"virtual_seconds": 4820, "real_seconds": 315.8, "outcomes": {"ok": 100}, "result_latency": {"p50": 2292.5, "p95": 4453.3, "max": 4782.4, "n": 
+A_u100_p2_v2base {"virtual_seconds": 6360, "real_seconds": 324.5, "outcomes": {"ok": 100}, "result_latency": {"p50": 3090.6, "p95": 5925.6, "max": 6322.3, "n": 
+A_u100_p16_v2base {"virtual_seconds": 3902, "real_seconds": 177.4, "outcomes": {"ok": 100}, "result_latency": {"p50": 1696.3, "p95": 3532.8, "max": 3863.5, "n":
+A_u100_p2_v2all {"virtual_seconds": 6175, "real_seconds": 158.5, "outcomes": {"ok": 100}, "result_latency": {"p50": 2937.6, "p95": 5757.2, "max": 6136.8, "n": 1
+A_u50_p8_v2phones {"virtual_seconds": 1386, "real_seconds": 113.2, "outcomes": {"ok": 50}, "result_latency": {"p50": 612.2, "p95": 1187.3, "max": 1347.0, "n": 5
+A_u50_p4_v2phones {"virtual_seconds": 1491, "real_seconds": 114.4, "outcomes": {"ok": 50}, "result_latency": {"p50": 647.6, "p95": 1274.7, "max": 1451.4, "n": 5
+A_u50_p2_v2phones {"virtual_seconds": 1895, "real_seconds": 123.2, "outcomes": {"ok": 50}, "result_latency": {"p50": 881.5, "p95": 1703.1, "max": 1856.1, "n": 5
+A_u50_p16_v2phones {"virtual_seconds": 1392, "real_seconds": 122.9, "outcomes": {"ok": 50}, "result_latency": {"p50": 615.1, "p95": 1192.2, "max": 1352.3, "n": 
+A_u100_p4_v2phones {"virtual_seconds": 3113, "real_seconds": 241.0, "outcomes": {"ok": 100}, "result_latency": {"p50": 1351.5, "p95": 2822.6, "max": 3074.6, "n"
+A_u100_p2_v2phones {"virtual_seconds": 4309, "real_seconds": 269.6, "outcomes": {"ok": 100}, "result_latency": {"p50": 2027.6, "p95": 3975.1, "max": 4270.6, "n"
+A_u100_p8_v2phones {"virtual_seconds": 2938, "real_seconds": 214.9, "outcomes": {"ok": 100}, "result_latency": {"p50": 1276.9, "p95": 2649.9, "max": 2900.1, "n"
+A_u50_p2_v2tuned {"virtual_seconds": 1807, "real_seconds": 104.1, "outcomes": {"ok": 50}, "result_latency": {"p50": 856.3, "p95": 1563.3, "max": 1767.3, "n": 50
+A_u50_p4_v2tuned {"virtual_seconds": 917, "real_seconds": 84.7, "outcomes": {"ok": 50}, "result_latency": {"p50": 414.6, "p95": 771.4, "max": 876.0, "n": 50}, "
+A_u50_p8_v2tuned {"virtual_seconds": 469, "real_seconds": 73.2, "outcomes": {"ok": 50}, "result_latency": {"p50": 166.0, "p95": 376.0, "max": 429.3, "n": 50}, "
+A_u100_p16_v2phones {"virtual_seconds": 2967, "real_seconds": 208.0, "outcomes": {"ok": 100}, "result_latency": {"p50": 1276.1, "p95": 2674.0, "max": 2929.5, "n
+A_u50_p16_v2tuned {"virtual_seconds": 346, "real_seconds": 75.1, "outcomes": {"ok": 50}, "result_latency": {"p50": 107.5, "p95": 280.3, "max": 303.2, "n": 50}, 
+A_u100_p8_v2tuned {"virtual_seconds": 887, "real_seconds": 136.5, "outcomes": {"ok": 100}, "result_latency": {"p50": 255.5, "p95": 743.5, "max": 848.0, "n": 100
+A_u100_p4_v2tuned {"virtual_seconds": 2078, "real_seconds": 184.0, "outcomes": {"ok": 100}, "result_latency": {"p50": 800.9, "p95": 1866.0, "max": 2039.2, "n": 
+A_u100_p2_v2tuned {"virtual_seconds": 3893, "real_seconds": 220.5, "outcomes": {"ok": 100}, "result_latency": {"p50": 1746.6, "p95": 3559.1, "max": 3855.5, "n":
+A_u100_p16_v2tuned {"virtual_seconds": 495, "real_seconds": 78.2, "outcomes": {"ok": 100}, "result_latency": {"p50": 155.1, "p95": 416.0, "max": 455.7, "n": 100

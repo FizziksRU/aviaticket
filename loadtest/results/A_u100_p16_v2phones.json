@@ -1,0 +1,332 @@
+{
+ "scenario": "A",
+ "users": 100,
+ "phones": 16,
+ "ideal": false,
+ "sites_auto": false,
+ "max_parallel": 0,
+ "seed": 7,
+ "virtual_seconds": 2967,
+ "real_seconds": 208.0,
+ "searches_requested": 100,
+ "outcomes": {
+  "ok": 100
+ },
+ "result_latency": {
+  "p50": 1276.1,
+  "p95": 2674.0,
+  "max": 2929.5,
+  "n": 100
+ },
+ "wait_over": {
+  ">2min": 96,
+  ">5min": 91,
+  ">15min": 64,
+  ">60min": 0
+ },
+ "first_response": {
+  "p50": 0.0,
+  "p95": 0.0,
+  "max": 0.0
+ },
+ "dialog_step": {
+  "p50": 0.0,
+  "p95": 0.0,
+  "max": 0.0
+ },
+ "tracked": 0,
+ "subscriptions": {
+  "total": 0,
+  "active": 0,
+  "groups": 0
+ },
+ "pipeline_searches": {
+  "user": 100,
+  "scheduler": 0
+ },
+ "search_wall": {
+  "p50": 59.6,
+  "p95": 131.6
+ },
+ "sites": {
+  "aviasales": {
+   "n": 100,
+   "ok": 100,
+   "cached": 31,
+   "partial": 19,
+   "avg_elapsed": 31.0
+  },
+  "kupibilet": {
+   "n": 100,
+   "ok": 100,
+   "cached": 31,
+   "partial": 0,
+   "avg_elapsed": 17.3
+  },
+  "tutu": {
+   "n": 100,
+   "ok": 100,
+   "cached": 31,
+   "partial": 0,
+   "avg_elapsed": 9.8
+  },
+  "yandex_travel": {
+   "n": 100,
+   "ok": 95,
+   "cached": 31,
+   "partial": 14,
+   "avg_elapsed": 8.2
+  },
+  "onetwotrip": {
+   "n": 100,
+   "ok": 81,
+   "cached": 32,
+   "partial": 0,
+   "avg_elapsed": 25.0
+  },
+  "ozon_travel": {
+   "n": 100,
+   "ok": 100,
+   "cached": 31,
+   "partial": 0,
+   "avg_elapsed": 7.3
+  }
+ },
+ "phones_util": {
+  "realme": 0.166,
+  "redmi": 0.101,
+  "phone3": 0.142,
+  "phone4": 0.094,
+  "phone5": 0.236,
+  "phone6": 0.074,
+  "phone7": 0.145,
+  "phone8": 0.108,
+  "phone9": 0.164,
+  "phone10": 0.106,
+  "phone11": 0.194,
+  "phone12": 0.081,
+  "phone13": 0.196,
+  "phone14": 0.124,
+  "phone15": 0.159,
+  "phone16": 0.111
+ },
+ "phone_requests": {
+  "realme": 29,
+  "redmi": 27,
+  "phone3": 28,
+  "phone4": 25,
+  "phone5": 35,
+  "phone6": 20,
+  "phone7": 27,
+  "phone8": 28,
+  "phone9": 29,
+  "phone10": 28,
+  "phone11": 30,
+  "phone12": 21,
+  "phone13": 29,
+  "phone14": 30,
+  "phone15": 28,
+  "phone16": 28
+ },
+ "phone_by_site": {
+  "realme": {
+   "aviasales": 10,
+   "onetwotrip": 8,
+   "yandex_travel": 11
+  },
+  "redmi": {
+   "tutu": 10,
+   "kupibilet": 6,
+   "ozon_travel": 11
+  },
+  "phone3": {
+   "yandex_travel": 11,
+   "onetwotrip": 11,
+   "aviasales": 6
+  },
+  "phone4": {
+   "kupibilet": 8,
+   "ozon_travel": 9,
+   "tutu": 8
+  },
+  "phone5": {
+   "onetwotrip": 15,
+   "aviasales": 12,
+   "yandex_travel": 8
+  },
+  "phone6": {
+   "tutu": 9,
+   "kupibilet": 5,
+   "ozon_travel": 6
+  },
+  "phone7": {
+   "yandex_travel": 12,
+   "aviasales": 7,
+   "onetwotrip": 8
+  },
+  "phone8": {
+   "kupibilet": 8,
+   "ozon_travel": 12,
+   "tutu": 8
+  },
+  "phone9": {
+   "onetwotrip": 12,
+   "yandex_travel": 10,
+   "aviasales": 7
+  },
+  "phone10": {
+   "kupibilet": 10,
+   "tutu": 9,
+   "ozon_travel": 9
+  },
+  "phone11": {
+   "yandex_travel": 9,
+   "aviasales": 11,
+   "onetwotrip": 10
+  },
+  "phone12": {
+   "ozon_travel": 7,
+   "kupibilet": 7,
+   "tutu": 7
+  },
+  "phone13": {
+   "aviasales": 11,
+   "onetwotrip": 9,
+   "yandex_travel": 9
+  },
+  "phone14": {
+   "tutu": 9,
+   "kupibilet": 13,
+   "ozon_travel": 8
+  },
+  "phone15": {
+   "yandex_travel": 9,
+   "onetwotrip": 14,
+   "aviasales": 5
+  },
+  "phone16": {
+   "kupibilet": 12,
+   "ozon_travel": 7,
+   "tutu": 9
+  }
+ },
+ "phone_outcomes": {
+  "ok": 389,
+  "miss": 53
+ },
+ "telegram": {
+  "stats": {
+   "getUpdates": 777,
+   "sendMessage": 819,
+   "answerCallbackQuery": 300,
+   "deleteMessage": 100
+  },
+  "errors": [],
+  "n_errors": 0
+ },
+ "memory": {
+  "start_mb": 0.0,
+  "end_mb": 99.7,
+  "peak_mb": 139.7,
+  "samples_mb": [
+   [
+    0,
+    0.4
+   ],
+   [
+    600,
+    25.9
+   ],
+   [
+    1200,
+    52.6
+   ],
+   [
+    1800,
+    71.1
+   ],
+   [
+    2400,
+    86.3
+   ]
+  ]
+ },
+ "state_sizes": {
+  "sessions": 100,
+  "result_store": 100,
+  "guard_cache": 36
+ },
+ "log": {
+  "WARNING avia.pipeline: Сайт onetwotrip вернул 0 вариантов (формат выдачи мог измениться, 0 ва": 19,
+  "WARNING avia.pipeline: Парсер сайта onetwotrip вернул 0 вариантов: формат выдачи мог изменить": 19,
+  "WARNING avia.pipeline: Сайт yandex_travel вернул 0 вариантов (формат выдачи мог измениться, 0": 10,
+  "WARNING avia.pipeline: Парсер сайта yandex_travel вернул 0 вариантов: формат выдачи мог измен": 5,
+  "WARNING avia.bot: сайт onetwotrip: 3 сборов подряд без результата (формат выдачи мог изм": 1
+ },
+ "sched_intervals": {
+  "groups_polled": 0
+ },
+ "examples": [
+  {
+   "chat_id": 100025,
+   "route": [
+    "2026-12-17",
+    null
+   ],
+   "t_click": 9643.289538477098,
+   "t_result": 9681.164280301844,
+   "outcome": "ok",
+   "step_latencies": [
+    0.004728542000520974,
+    0.0051550000007409835,
+    0.004499791999478475,
+    0.00428170799932559,
+    0.004835458999878028,
+    0.005590541999481502
+   ],
+   "tracked": false,
+   "text_head": "✈️ <b>Москва → Санкт-Петербург</b>, 17.12.2026, пассажиров: 1\n\n1. <b>Самый дешёв"
+  },
+  {
+   "chat_id": 100094,
+   "route": [
+    "2026-12-01",
+    null
+   ],
+   "t_click": 9643.446017255466,
+   "t_result": 9716.845030479977,
+   "outcome": "ok",
+   "step_latencies": [
+    0.004477124999539228,
+    0.005316624999977648,
+    0.004857500000071013,
+    0.004423832999236765,
+    0.00761666700054775,
+    0.006736708999596885
+   ],
+   "tracked": false,
+   "text_head": "✈️ <b>Москва → Санкт-Петербург</b>, 01.12.2026, пассажиров: 1\n\n1. <b>Самый дешёв"
+  },
+  {
+   "chat_id": 100039,
+   "route": [
+    "2026-11-22",
+    null
+   ],
+   "t_click": 9643.967024557593,
+   "t_result": 9747.63103974196,
+   "outcome": "ok",
+   "step_latencies": [
+    0.0037814170009369263,
+    0.004103249999388936,
+    0.003930791999664507,
+    0.004112791999432375,
+    0.004514583000855055,
+    0.007226540999909048
+   ],
+   "tracked": false,
+   "text_head": "✈️ <b>Москва → Санкт-Петербург</b>, 22.11.2026, пассажиров: 1\n\n1. <b>Самый дешёв"
+  }
+ ],
+ "scheduler_checks": {}
+}

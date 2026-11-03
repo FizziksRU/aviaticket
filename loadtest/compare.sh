@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Сравнение «до/после» на одном профиле мока: loadtest/compare.sh "A" "50 100" "2 4 8"
 # Варианты: base (текущий код, ветка work), all (scale-audit-all без флагов),
-# phones (+PHONE_MAP по замерам, RETRY_OTHER_PHONE=1), tuned (+guard 10 с, параллельность по числу телефонов).
+# phones (+PHONE_MAP по замерам, RETRY_OTHER_PHONE=1), tuned (+guard 10 с, параллельность по числу телефонов),
+# parallel (как tuned, но интервал guard прежний — 30 с).
 set -uo pipefail
 cd "$(dirname "$0")/.."
 WORK="$PWD"; DEV="${DEV:-$HOME/avia-scale/dev}"
@@ -16,6 +17,8 @@ for v in $VARIANTS; do for s in $1; do for u in $2; do for p in $3; do echo "$v 
       all) ;;
       phones) extra="--phone-map optimal"; export RETRY_OTHER_PHONE=1 ;;
       tuned) extra="--phone-map optimal"; export RETRY_OTHER_PHONE=1 GUARD_MIN_INTERVAL=10 SITES_PER_SEARCH=6 \
+               MAX_PARALLEL_SEARCHES=$p GUARD_SITE_CONCURRENCY=$(( p / 2 > 0 ? p / 2 : 1 )) SEARCH_PRIORITY=1 ;;
+      parallel) extra="--phone-map optimal"; export RETRY_OTHER_PHONE=1 GUARD_MIN_INTERVAL=30 SITES_PER_SEARCH=6 \
                MAX_PARALLEL_SEARCHES=$p GUARD_SITE_CONCURRENCY=$(( p / 2 > 0 ? p / 2 : 1 )) SEARCH_PRIORITY=1 ;;
     esac
     PYTHONPATH="$src:'"$WORK"'" '"$WORK"'/.venv/bin/python -m loadtest.run --scenario "$s" --users "$u" --phones "$p" \
