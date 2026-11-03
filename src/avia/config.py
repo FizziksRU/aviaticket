@@ -75,6 +75,7 @@ class Settings:
     # PHONE_MAP: сайт → телефоны поверх phone из sites.yaml («ozon_travel=redmi;aviasales=realme»)
     phone_map: dict[str, list[str]] = field(default_factory=dict)
     retry_other_phone: bool = False  # RETRY_OTHER_PHONE=1: повтор пустой выдачи на другом телефоне
+    health_alerts: bool = False  # HEALTH_ALERTS=1: писать админам, когда сайт 3 раза подряд без результата
 
 
 def parse_phone_map(raw: str) -> dict[str, list[str]]:
@@ -140,4 +141,5 @@ def load_settings(path: Path | None = None) -> Settings:
         queue_notice=os.getenv("QUEUE_NOTICE", "0") == "1",
         phone_map=parse_phone_map(os.getenv("PHONE_MAP", "")),
         retry_other_phone=os.getenv("RETRY_OTHER_PHONE", "0") == "1",
+        health_alerts=os.getenv("HEALTH_ALERTS", "0") == "1",
     )

@@ -30,6 +30,7 @@ log = logging.getLogger("avia.pipeline")
 
 # Общий SearchGuard на процесс (модульный объект для тестов с подменой)
 guard = SearchGuard()
+RT_UNSUPPORTED = "для этого сайта обратные билеты пока не поддерживаются"
 
 
 def configure(settings: Settings) -> SearchGuard:
@@ -283,7 +284,7 @@ async def _run_site(
             site=site.name,
             ok=False,
             offers=[],
-            error="для этого сайта обратные билеты пока не поддерживаются",
+            error=RT_UNSUPPORTED,
         )
     t0 = time.monotonic()
     g = guard if guard is not None else globals()["guard"]
@@ -384,7 +385,7 @@ async def search(
                 site=s.name,
                 ok=False,
                 offers=[],
-                error="для этого сайта обратные билеты пока не поддерживаются",
+                error=RT_UNSUPPORTED,
             )
         async with sem:
             return await _run_site(s, q, settings, guard=g)
