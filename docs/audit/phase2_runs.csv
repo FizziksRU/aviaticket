@@ -1,0 +1,37 @@
+ts,site,phone,route,seconds,finished,captcha,text_len,n_json,json_bytes,offers,partial,min_price,error
+2026-11-03T20:04:09Z,kupibilet,redmi,near,12.8,True,False,1500,2,153590,114,False,2194,
+2026-11-03T20:05:28Z,aviasales,realme,near,22.9,True,False,2690,6,3079355,11,False,2194,
+2026-11-03T20:05:28Z,tutu,redmi,near,13.9,True,False,3472,1,69889,10,False,2442,
+2026-11-03T20:06:12Z,kupibilet,realme,near,6,True,False,7390,2,153590,114,False,2194,
+2026-11-03T20:06:12Z,yandex_travel,redmi,near,15.5,True,False,2197,1,963232,301,True,2194,
+2026-11-03T20:07:25Z,tutu,realme,near,5.5,True,False,4155,1,69899,10,False,2442,
+2026-11-03T20:07:25Z,onetwotrip,redmi,near,,,,,,,0,,,"mcp: Error executing tool fetch_page"
+2026-11-03T20:08:08Z,yandex_travel,realme,near,7.7,True,False,2172,1,1589467,516,True,2404,
+2026-11-03T20:08:08Z,ozon_travel,redmi,near,9.1,True,False,1173,1,94276,30,False,2205,
+2026-11-03T20:09:28Z,onetwotrip,realme,near,7.3,True,False,1452,1,542462,120,False,2493,
+2026-11-03T20:09:32Z,aviasales,redmi,near,46.8,False,False,2950,0,0,0,,,"ParserEmptyError: формат выдачи мог измениться, 0 вариантов при непустой странице"
+2026-11-03T20:10:42Z,kupibilet,redmi,far,12.3,True,False,6980,2,168791,201,False,6433,
+2026-11-03T20:10:50Z,ozon_travel,realme,near,31.2,False,False,5200,0,0,0,,,"ParserEmptyError: формат выдачи мог измениться, 0 вариантов при непустой странице"
+2026-11-03T20:11:45Z,aviasales,realme,far,22,True,False,2627,6,3516307,10,False,6540,
+2026-11-03T20:11:45Z,tutu,redmi,far,12.1,True,False,3349,1,76460,10,False,6570,
+2026-11-03T20:12:24Z,kupibilet,realme,far,7,True,False,7036,2,168791,201,False,6433,
+2026-11-03T20:12:24Z,yandex_travel,redmi,far,13,True,False,2476,1,1196788,357,True,6505,
+2026-11-03T20:13:41Z,tutu,realme,far,5.2,True,False,3982,1,81312,10,False,6570,
+2026-11-03T20:13:41Z,onetwotrip,redmi,far,,,,,,,0,,,"mcp: Error executing tool fetch_page"
+2026-11-03T20:14:21Z,yandex_travel,realme,far,6.5,True,False,2268,1,1219185,346,True,6518,
+2026-11-03T20:14:22Z,ozon_travel,redmi,far,9.7,True,False,1026,2,101845,19,False,6447,
+2026-11-03T20:15:25Z,onetwotrip,realme,far,8.3,True,False,1588,1,180291,41,False,6810,
+2026-11-03T20:15:25Z,aviasales,redmi,far,37.7,True,False,3333,3,3035345,10,False,6540,
+2026-11-03T20:16:33Z,ozon_travel,realme,far,31.3,False,False,5900,0,0,0,,,"ParserEmptyError: формат выдачи мог измениться, 0 вариантов при непустой странице"
+2026-11-03T20:16:33Z,kupibilet,redmi,rt,14.9,True,False,10847,1,108054,200,False,5592,
+2026-11-03T20:17:53Z,aviasales,realme,rt,46,False,False,3578,7,4816389,11,True,5626,
+2026-11-03T20:17:53Z,yandex_travel,redmi,rt,12.2,True,False,2693,1,1151659,376,True,5650,
+2026-11-03T20:18:38Z,kupibilet,realme,rt,6.3,True,False,10925,1,108054,200,False,5592,
+2026-11-03T20:18:38Z,tutu,redmi,rt,16.3,True,False,4066,1,1439428,10,False,6157,
+2026-11-03T20:19:20Z,tutu,realme,rt,12.7,True,False,4718,1,1516447,10,False,6017,
+2026-11-03T20:19:21Z,ozon_travel,redmi,rt,8.7,True,False,5984,1,161166,30,False,5616,
+2026-11-03T20:20:36Z,yandex_travel,realme,rt,8.4,True,False,3900,0,0,0,,,"ParserEmptyError: формат выдачи мог измениться, 0 вариантов при непустой странице"
+2026-11-03T20:20:36Z,aviasales,redmi,rt,46.3,False,False,5600,0,0,0,,,"ParserEmptyError: формат выдачи мог измениться, 0 вариантов при непустой странице"
+2026-11-03T20:22:15Z,onetwotrip,realme,rt,31.2,False,False,1000,0,0,0,,,"ParserEmptyError: формат выдачи мог измениться, 0 вариантов при непустой странице"
+2026-11-03T20:22:15Z,onetwotrip,redmi,rt,,,,,,,0,,,"mcp: Error executing tool fetch_page"
+2026-11-03T20:23:54Z,yandex_travel,realme,near,39.2,True,False,2038,13,5676599,1485,False,2194,
