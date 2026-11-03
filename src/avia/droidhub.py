@@ -32,15 +32,27 @@ class DroidhubError(Exception):
         self.status_code = status_code
 
 
-def _get_device_lock(device_id: str) -> asyncio.Lock:
-    """Возвращает или создаёт asyncio.Lock для конкретного device_id."""
-    clean_id = device_id.strip()
+def _sync_loop_state() -> asyncio.AbstractEventLoop | None:
+    """Синхронизирует блокировки и состояние пула с текущим циклом событий."""
+    global _pool_condition, _pool_loop, _busy_devices, _device_locks
     try:
         loop = asyncio.get_running_loop()
     except RuntimeError:
         loop = None
+    if _pool_loop is not loop:
+        _pool_condition = None
+        _pool_loop = loop
+        _busy_devices.clear()
+        _device_locks.clear()
+    return loop
+
+
+def _get_device_lock(device_id: str) -> asyncio.Lock:
+    """Возвращает или создаёт asyncio.Lock для конкретного device_id."""
+    clean_id = device_id.strip()
+    _sync_loop_state()
     lock = _device_locks.get(clean_id)
-    if lock is None or (getattr(lock, "_loop", None) is not None and lock._loop is not loop):
+    if lock is None:
         lock = asyncio.Lock()
         _device_locks[clean_id] = lock
     return lock
@@ -48,15 +60,10 @@ def _get_device_lock(device_id: str) -> asyncio.Lock:
 
 def _get_pool_condition() -> asyncio.Condition:
     """Возвращает или создаёт asyncio.Condition, привязанный к текущему циклу событий."""
-    global _pool_condition, _pool_loop, _busy_devices
-    try:
-        loop = asyncio.get_running_loop()
-    except RuntimeError:
-        loop = None
-    if _pool_condition is None or _pool_loop is not loop:
+    global _pool_condition
+    _sync_loop_state()
+    if _pool_condition is None:
         _pool_condition = asyncio.Condition()
-        _pool_loop = loop
-        _busy_devices.clear()
     return _pool_condition
 
 

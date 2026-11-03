@@ -33,10 +33,10 @@ def clean_pipeline_guard():
 @pytest.mark.asyncio
 async def test_pipeline_phone_captcha(monkeypatch):
     """captcha=true на телефоне даёт ошибку RuntimeError в _from_browser и SiteResult(ok=False) в поиске."""
-    async def fake_fetch_page_snapshot(settings, device_id, url, **kwargs):
+    async def fake_fetch_page_snapshot_any(settings, candidates, url, **kwargs):
         return Snapshot(url=url, text="Капча", blocked=True), True
 
-    monkeypatch.setattr("avia.pipeline.fetch_page_snapshot", fake_fetch_page_snapshot)
+    monkeypatch.setattr("avia.pipeline.fetch_page_snapshot_any", fake_fetch_page_snapshot_any)
 
     site = SiteConfig("aviasales", "https://aviasales.ru/{origin}{destination}", phone="realme", parser="aviasales")
     settings = Settings(sites=[site], droidhub_url="https://hub.test", droidhub_token="secret_token")
@@ -64,7 +64,7 @@ async def test_pipeline_phone_finished_false_partial(monkeypatch):
     dummy_parser.results_complete = lambda snap: True  # type: ignore[attr-defined]
     monkeypatch.setitem(PARSERS, "phone_test_parser", dummy_parser)
 
-    async def fake_fetch_page_snapshot(settings, device_id, url, **kwargs):
+    async def fake_fetch_page_snapshot_any(settings, candidates, url, **kwargs):
         return Snapshot(
             url="https://aviasales.ru/search/MOW1012ALA1",
             text="Идёт поиск билетов...",
@@ -72,7 +72,7 @@ async def test_pipeline_phone_finished_false_partial(monkeypatch):
             blocked=False,
         ), False  # finished=False
 
-    monkeypatch.setattr("avia.pipeline.fetch_page_snapshot", fake_fetch_page_snapshot)
+    monkeypatch.setattr("avia.pipeline.fetch_page_snapshot_any", fake_fetch_page_snapshot_any)
 
     site = SiteConfig(
         "aviasales",
@@ -104,10 +104,10 @@ async def test_pipeline_phone_droidhub_error_no_chromium_fallback(monkeypatch):
 
     monkeypatch.setattr("avia.pipeline.fetch_snapshot", fake_chromium_fetch)
 
-    async def fake_fetch_page_snapshot(*args, **kwargs):
+    async def fake_fetch_page_snapshot_any(*args, **kwargs):
         raise DroidhubError("телефон недоступен или страница не открылась (502)")
 
-    monkeypatch.setattr("avia.pipeline.fetch_page_snapshot", fake_fetch_page_snapshot)
+    monkeypatch.setattr("avia.pipeline.fetch_page_snapshot_any", fake_fetch_page_snapshot_any)
 
     site = SiteConfig(
         "aviasales",
@@ -148,7 +148,7 @@ async def test_pipeline_site_without_phone_uses_chromium(monkeypatch):
         return Snapshot(url="phone", text="phone"), True
 
     monkeypatch.setattr("avia.pipeline.fetch_snapshot", fake_chromium_fetch)
-    monkeypatch.setattr("avia.pipeline.fetch_page_snapshot", fake_phone_fetch)
+    monkeypatch.setattr("avia.pipeline.fetch_page_snapshot_any", fake_phone_fetch)
 
     def dummy_parser(snap, q):
         return [Offer(site=snap.url, price=5000)]

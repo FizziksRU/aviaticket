@@ -13,7 +13,6 @@ from .config import Settings, SiteConfig
 from .droidhub import (
     DroidhubError,
     candidates,
-    fetch_page_snapshot,
     fetch_page_snapshot_any,
     phone_enabled,
 )
@@ -27,9 +26,6 @@ from .tutu_ids import resolve_city
 from .yandex_ids import city_id
 
 log = logging.getLogger("avia.pipeline")
-
-_ORIG_FETCH_PAGE_SNAPSHOT = fetch_page_snapshot
-_ORIG_FETCH_PAGE_SNAPSHOT_ANY = fetch_page_snapshot_any
 
 # Общий SearchGuard на процесс (модульный объект для тестов с подменой)
 guard = SearchGuard()
@@ -220,26 +216,14 @@ async def _from_browser(site: SiteConfig, q: Query, settings: Settings) -> tuple
     url = build_url(site, q, extra=extra)
 
     if phone_enabled(settings, site):
-        if fetch_page_snapshot is not _ORIG_FETCH_PAGE_SNAPSHOT and fetch_page_snapshot_any is _ORIG_FETCH_PAGE_SNAPSHOT_ANY:
-            cands = candidates(settings, site)
-            dev = cands[0] if cands else site.phone
-            snap, finished = await fetch_page_snapshot(
-                settings,
-                dev,
-                url,
-                wait_seconds=site.phone_wait_seconds,
-                capture_json=site.phone_capture_json,
-                wait_for=site.phone_wait_for,
-            )
-        else:
-            snap, finished = await fetch_page_snapshot_any(
-                settings,
-                candidates(settings, site),
-                url,
-                wait_seconds=site.phone_wait_seconds,
-                capture_json=site.phone_capture_json,
-                wait_for=site.phone_wait_for,
-            )
+        snap, finished = await fetch_page_snapshot_any(
+            settings,
+            candidates(settings, site),
+            url,
+            wait_seconds=site.phone_wait_seconds,
+            capture_json=site.phone_capture_json,
+            wait_for=site.phone_wait_for,
+        )
         if snap.blocked:
             raise RuntimeError("сайт показал капчу на телефоне")
         partial = not finished
