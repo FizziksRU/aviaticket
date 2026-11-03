@@ -32,6 +32,8 @@ class SiteConfig:
     phone: str = ""
     phone_capture_json: list[str] = field(default_factory=list)
     phone_wait_seconds: int = 40
+    # подстрока в ответе, по которой видно конец выдачи (хаб ждёт её появления)
+    phone_wait_for: str = ""
 
 
 @dataclass

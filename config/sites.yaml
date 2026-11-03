@@ -23,10 +23,10 @@ sites:
     source: browser
     parser: aviasales
     enabled: true
-    # телефон выключен: хаб отдаёт один кусок выдачи, а парсеру нужны все ответы
-    # phone: realme
-    # phone_capture_json: ["/search/v3.2/results"]
-    # phone_wait_seconds: 40
+    phone: realme
+    phone_capture_json: ["/search/v3.2/results"]
+    phone_wait_seconds: 45
+    phone_wait_for: '"last_update_timestamp":0'
     url_template: "https://www.aviasales.ru/search/{origin}{ddmm}{destination}{adults}"
     url_template_rt: "https://www.aviasales.ru/search/{origin}{ddmm}{destination}{ddmm_ret}{adults}"
     settle_ms: 25000

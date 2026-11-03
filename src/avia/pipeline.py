@@ -217,6 +217,7 @@ async def _from_browser(site: SiteConfig, q: Query, settings: Settings) -> tuple
             url,
             wait_seconds=site.phone_wait_seconds,
             capture_json=site.phone_capture_json,
+            wait_for=site.phone_wait_for,
         )
         if snap.blocked:
             raise RuntimeError("сайт показал капчу на телефоне")

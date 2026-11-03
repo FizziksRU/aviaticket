@@ -54,6 +54,7 @@ async def fetch_page_snapshot(
     *,
     wait_seconds: int = 40,
     capture_json: list[str] | None = None,
+    wait_for: str = "",
     client: httpx.AsyncClient | None = None,
 ) -> tuple[Snapshot, bool]:
     """Открывает страницу на телефоне через droidhub и возвращает (Snapshot, finished).
@@ -78,6 +79,8 @@ async def fetch_page_snapshot(
             "capture_json": list(capture_json) if capture_json is not None else [],
             "max_chars": 200000,
         }
+        if wait_for:
+            payload["wait_for"] = wait_for
 
         try:
             if client is not None:
