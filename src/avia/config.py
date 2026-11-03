@@ -60,6 +60,7 @@ class Settings:
     debug_dir: Path = field(default_factory=lambda: ROOT / "debug")
     top_n: int = 5
     tg_token: str = ""
+    tg_api_base: str = ""          # пусто = https://api.telegram.org; для моков и локального шлюза
     tg_allowed_ids: set[int] = field(default_factory=set)   # администраторы; без лимитов поисков
     tg_open: bool = False          # True: бот отвечает всем, пользователи регистрируются в users.sqlite
     daily_search_limit: int = 40   # поисков в сутки на человека (0 = без лимита)
@@ -101,6 +102,7 @@ def load_settings(path: Path | None = None) -> Settings:
         headless=os.getenv("HEADLESS", "1") != "0",
         top_n=int(os.getenv("TOP_N", "5")),
         tg_token=os.getenv("TG_BOT_TOKEN", ""),
+        tg_api_base=os.getenv("TG_API_BASE", ""),
         tg_allowed_ids=allowed,
         tg_open=os.getenv("TG_OPEN", "0") == "1",
         daily_search_limit=int(os.getenv("DAILY_SEARCH_LIMIT", "40")),
