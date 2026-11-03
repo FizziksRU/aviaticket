@@ -1,0 +1,11 @@
+.env
+.secrets_ok
+.git
+.venv
+state
+debug
+tests
+docs
+loadtest
+tools
+**/__pycache__

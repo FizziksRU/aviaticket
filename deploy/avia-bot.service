@@ -1,0 +1,23 @@
+# systemd без Docker: скопировать в /etc/systemd/system/, поправить пути и пользователя,
+# затем systemctl daemon-reload && systemctl enable --now avia-bot
+[Unit]
+Description=avia-bot (Telegram)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=avia
+WorkingDirectory=/opt/avia-bot
+EnvironmentFile=/opt/avia-bot/.env
+Environment=PYTHONPATH=/opt/avia-bot/src PYTHONUNBUFFERED=1
+ExecStart=/opt/avia-bot/.venv/bin/python -m avia.bot
+Restart=on-failure
+RestartSec=10
+TimeoutStopSec=40
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/opt/avia-bot/state /opt/avia-bot/debug
+
+[Install]
+WantedBy=multi-user.target
