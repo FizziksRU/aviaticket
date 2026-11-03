@@ -23,14 +23,15 @@ class DroidhubError(Exception):
 
 def _get_device_lock(device_id: str) -> asyncio.Lock:
     """Возвращает или создаёт asyncio.Lock для конкретного device_id."""
+    clean_id = device_id.strip()
     try:
         loop = asyncio.get_running_loop()
     except RuntimeError:
         loop = None
-    lock = _device_locks.get(device_id)
+    lock = _device_locks.get(clean_id)
     if lock is None or (getattr(lock, "_loop", None) is not None and lock._loop is not loop):
         lock = asyncio.Lock()
-        _device_locks[device_id] = lock
+        _device_locks[clean_id] = lock
     return lock
 
 
@@ -64,11 +65,12 @@ async def fetch_page_snapshot(
       - blocked: True, если обнаружена капча (captcha=true).
     finished: False, если выдача не догрузилась до конца за отведённое время.
     """
+    device_id = device_id.strip()
     lock = _get_device_lock(device_id)
     async with lock:
         wait_val = max(1, min(int(wait_seconds), 60))
         timeout = float(wait_seconds + 60)
-        endpoint = f"{settings.droidhub_url.strip().rstrip('/')}/api/devices/{device_id.strip()}/fetch_page"
+        endpoint = f"{settings.droidhub_url.strip().rstrip('/')}/api/devices/{device_id}/fetch_page"
         headers = {"Authorization": f"Bearer {settings.droidhub_token.strip()}"}
         payload: dict[str, Any] = {
             "url": url,

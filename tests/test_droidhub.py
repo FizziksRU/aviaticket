@@ -327,3 +327,42 @@ async def test_fetch_page_snapshot_strip_credentials_and_device(monkeypatch):
     assert recorded_url == "https://hub.test/api/devices/realme/fetch_page"
     assert recorded_auth == "Bearer secret_token_123"
 
+
+def test_get_device_lock_whitespace_normalization():
+    """_get_device_lock нормализует идентификатор устройства с краевыми пробелами."""
+    from avia.droidhub import _device_locks, _get_device_lock
+
+    _device_locks.clear()
+    lock1 = _get_device_lock("realme")
+    lock2 = _get_device_lock("  realme \n\t ")
+    assert lock1 is lock2
+
+
+@pytest.mark.asyncio
+async def test_device_locks_serialization_whitespace(monkeypatch):
+    """Параллельные запросы к одному телефону с пробелами в id используют одну блокировку."""
+    active_requests = 0
+    max_active_requests = 0
+
+    async def async_handler(request: httpx.Request) -> httpx.Response:
+        nonlocal active_requests, max_active_requests
+        active_requests += 1
+        if active_requests > max_active_requests:
+            max_active_requests = active_requests
+        await asyncio.sleep(0.05)
+        active_requests -= 1
+        return httpx.Response(200, json={"url": "https://ok.test", "text": "ok", "finished": True})
+
+    _mock_async_client(monkeypatch, async_handler)
+
+    settings = Settings(sites=[], droidhub_url="https://hub.test", droidhub_token="tok")
+
+    task1 = asyncio.create_task(fetch_page_snapshot(settings, "realme", "https://site1.test"))
+    task2 = asyncio.create_task(fetch_page_snapshot(settings, "  realme  ", "https://site2.test"))
+
+    res1, res2 = await asyncio.gather(task1, task2)
+    assert res1[1] is True
+    assert res2[1] is True
+    assert max_active_requests == 1
+
+
