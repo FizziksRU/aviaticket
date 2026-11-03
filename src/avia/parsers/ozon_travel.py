@@ -89,7 +89,7 @@ def _parse_baggage(luggage_obj: Any) -> str | None:
     text_clean = text.replace("\xa0", " ").replace("\u2009", " ").strip()
     text_lower = text_clean.lower()
 
-    if "+" in text_clean or "доплат" in text_lower:
+    if re.search(r"\+\s*\d+", text_clean) or "доплат" in text_lower:
         return "без багажа"
     if "ручная кладь" in text_lower and "багаж" not in text_lower:
         return "без багажа"
@@ -238,7 +238,7 @@ def parse_ozon_travel(snapshot: Snapshot, query: Query) -> list[Offer]:
                 raw_tdiff = tdiff_obj.get("text", "")
                 if raw_tdiff:
                     norm_tdiff = raw_tdiff.translate(SUPERSCRIPT_TRANS)
-                    m = re.search(r"\d+", norm_tdiff)
+                    m = re.search(r"[+-]?\d+", norm_tdiff)
                     if m:
                         days_offset = int(m.group(0))
 

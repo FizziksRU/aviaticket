@@ -122,6 +122,41 @@ def test_baggage_included_when_no_surcharge():
     assert len(offers) == 1
     assert offers[0].baggage == "с багажом"
 
+    # Проверка текста вида "Багаж + ручная кладь": плюс без суммы не считается доплатой
+    card_combo = dict(base_data["state"]["flights"][0])
+    card_combo["luggageText"] = {"text": "Багаж + ручная кладь"}
+    snap_combo = make_snapshot([(WIDGET_URL, json.dumps({"state": {"flights": [card_combo]}}))])
+    offers_combo = parse_ozon_travel(snap_combo, _q())
+    assert len(offers_combo) == 1
+    assert offers_combo[0].baggage == "с багажом"
+
+
+def test_time_difference_date_offsets():
+    """Сдвиг даты прилёта корректно обрабатывает надстрочные индексы и знаки (+ и -)."""
+    base_data = json.loads(WIDGET_JSON)
+
+    # Рейс со сдвигом на -1 день (например, пересечение линии перемены дат)
+    card_minus = dict(base_data["state"]["flights"][0])
+    way_minus = dict(card_minus["wayThereDetails"])
+    way_minus["timeDifference"] = {"text": "⁻¹"}
+    card_minus["wayThereDetails"] = way_minus
+    snap_minus = make_snapshot([(WIDGET_URL, json.dumps({"state": {"flights": [card_minus]}}))])
+    offers_minus = parse_ozon_travel(snap_minus, _q())
+    assert len(offers_minus) == 1
+    assert offers_minus[0].depart_at == "2026-12-01T17:35"
+    assert offers_minus[0].arrive_at == "2026-11-30T14:00"
+
+    # Рейс со сдвигом на +2 дня
+    card_plus2 = dict(base_data["state"]["flights"][0])
+    way_plus2 = dict(card_plus2["wayThereDetails"])
+    way_plus2["timeDifference"] = {"text": "⁺²"}
+    card_plus2["wayThereDetails"] = way_plus2
+    snap_plus2 = make_snapshot([(WIDGET_URL, json.dumps({"state": {"flights": [card_plus2]}}))])
+    offers_plus2 = parse_ozon_travel(snap_plus2, _q())
+    assert len(offers_plus2) == 1
+    assert offers_plus2[0].depart_at == "2026-12-01T17:35"
+    assert offers_plus2[0].arrive_at == "2026-12-03T14:00"
+
 
 def test_empty_snapshot_returns_empty_list():
     """Пустой snapshot или snapshot без ответов возвращает пустой список."""
