@@ -1,0 +1,29 @@
+B_u100_p2_v2base {"virtual_seconds": 86541, "real_seconds": 2238.8, "outcomes": {"ok": 490}, "result_latency": {"p50": 186.7, "p95": 383.8, "max": 536.2, "n": 4
+B_u100_p4_v2base {"virtual_seconds": 86478, "real_seconds": 2539.1, "outcomes": {"ok": 490}, "result_latency": {"p50": 110.1, "p95": 240.6, "max": 366.7, "n": 4
+loadtest/compare.sh: line 22: 15547 Done                    for v in $VARIANTS;
+do
+    for s in $1;
+    do
+        for u in $2;
+        do
+            for p in $3;
+            do
+                echo "$v $s $u $p";
+            done;
+        done;
+    done;
+done
+     15548 Terminated: 15          | xargs -P "${JOBS:-3}" -L 1 sh -c '
+    v=$0 s=$1 u=$2 p=$3
+    src="'"$DEV"'/src"; extra=""
+    case $v in
+      base) src="'"$WORK"'/src" ;;
+      all) ;;
+      phones) extra="--phone-map optimal"; export RETRY_OTHER_PHONE=1 ;;
+      tuned) extra="--phone-map optimal"; export RETRY_OTHER_PHONE=1 GUARD_MIN_INTERVAL=10 SITES_PER_SEARCH=6 \
+               MAX_PARALLEL_SEARCHES=$p GUARD_SITE_CONCURRENCY=$(( p / 2 > 0 ? p / 2 : 1 )) SEARCH_PRIORITY=1 ;;
+    esac
+    PYTHONPATH="$src:'"$WORK"'" '"$WORK"'/.venv/bin/python -m loadtest.run --scenario "$s" --users "$u" --phones "$p" \
+      $extra --tag "_v2$v" 2>/dev/null | grep -E "^[ABC]_u" | cut -c1-160'
+loadtest/compare.sh: line 23: syntax error near unexpected token `;;'
+loadtest/compare.sh: line 23: `       MAX_PARALLEL_SEARCHES=$p GUARD_SITE_CONCURRENCY=$(( p / 2 > 0 ? p / 2 : 1 )) SEARCH_PRIORITY=1 ;;'

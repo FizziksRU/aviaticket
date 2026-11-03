@@ -206,7 +206,7 @@ async def _scenario(args: argparse.Namespace, clock: vclock.VirtualClock) -> dic
                     await asyncio.sleep(max(0.0, t - last))
                     t_before = loop.time()
                     d, r = chooser.pick()
-                    records.append(await u.search(d, r, track=(k == 0)))
+                    records.append(await u.search(d, r, track=(k == 0 and not args.no_track)))
                     last = t + (loop.time() - t_before)
 
             await asyncio.gather(*(day(i) for i in range(args.users)))
@@ -253,7 +253,7 @@ def _report(args: argparse.Namespace, records: list[SearchRecord], searches: lis
     subs = _subscription_stats(bot.s.storage_dir / "subscriptions.sqlite")
     return {
         "scenario": args.scenario, "users": args.users, "phones": args.phones, "ideal": args.ideal,
-        "sites_auto": args.sites_auto, "max_parallel": args.max_parallel, "seed": args.seed,
+        "sites_auto": args.sites_auto, "max_parallel": args.max_parallel, "no_track": args.no_track, "seed": args.seed,
         "virtual_seconds": round(elapsed), "real_seconds": round(real, 1),
         "searches_requested": len(records), "outcomes": dict(outcomes),
         "result_latency": {"p50": pct(lat, 50), "p95": pct(lat, 95), "max": pct(lat, 100), "n": len(lat)},
@@ -343,6 +343,7 @@ def main() -> None:
     ap.add_argument("--ideal", action="store_true", help="без сбоев телефонов (для сравнения)")
     ap.add_argument("--sites-auto", action="store_true", help="все сайты phone: auto (эксперимент)")
     ap.add_argument("--max-parallel", type=int, default=0)
+    ap.add_argument("--no-track", action="store_true", help="B/C без отслеживаний: сколько подписки отнимают у людей")
     ap.add_argument("--seed", type=int, default=7)
     ap.add_argument("--patience", type=float, default=4 * 3600, help="сколько виртуальный человек ждёт выдачу, с")
     ap.add_argument("--phone-map", choices=["", "optimal"], default="",
@@ -352,7 +353,7 @@ def main() -> None:
     logging.getLogger().setLevel(logging.WARNING)
     result, _ = vclock.run(lambda clock: _scenario(args, clock))
     RESULTS.mkdir(exist_ok=True)
-    name = f"{args.scenario}_u{args.users}_p{args.phones}{'_ideal' if args.ideal else ''}{'_auto' if args.sites_auto else ''}{args.tag}"
+    name = f"{args.scenario}_u{args.users}_p{args.phones}{'_ideal' if args.ideal else ''}{'_auto' if args.sites_auto else ''}{'_notrack' if args.no_track else ''}{args.tag}"
     (RESULTS / f"{name}.json").write_text(json.dumps(result, ensure_ascii=False, indent=1), encoding="utf-8")
     keys = ("virtual_seconds", "real_seconds", "outcomes", "result_latency", "first_response", "phones_util",
             "pipeline_searches")
