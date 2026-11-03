@@ -28,10 +28,14 @@ from .pipeline import search
 from .scheduler import Scheduler
 from .store import ResultStore
 from .subscriptions import SubscriptionStore
+from .tg_text import html_to_plain, split_html
 from .users import UserStore
 
 log = logging.getLogger("avia.bot")
 API = "https://api.telegram.org/bot{token}/{method}"
+# 429 от Telegram: повторяем после retry_after, но не дольше минуты на попытку и не больше 3 раз
+TG_MAX_RETRIES = 3
+TG_MAX_RETRY_AFTER = 60.0
 
 
 class Bot:
@@ -47,6 +51,7 @@ class Bot:
             raise SystemExit("Задайте TG_ALLOWED_IDS в .env (ваш Telegram id) или TG_OPEN=1, иначе некому отвечать")
         self.s = settings
         self.http = httpx.AsyncClient(timeout=70)
+        self._sleep = asyncio.sleep
         self.busy: set[int] = set()
         self.users = UserStore(settings.storage_dir / "users.sqlite")
         self._search_sem = asyncio.Semaphore(settings.max_parallel_searches)
@@ -60,46 +65,32 @@ class Bot:
             self.store = store if store is not None else ResultStore()
             self.dialog = Dialog(store=self.store, subs=self.subs)
 
+    def _api_url(self, method: str) -> str:
+        base = self.s.tg_api_base.strip().rstrip("/")
+        if base:
+            return f"{base}/bot{self.s.tg_token}/{method}"
+        return API.format(token=self.s.tg_token, method=method)
+
     async def call(self, method: str, **params):
         payload = {k: v for k, v in params.items() if v is not None}
-        r = await self.http.post(API.format(token=self.s.tg_token, method=method), json=payload)
-        data = r.json()
-        if not data.get("ok"):
+        for attempt in range(TG_MAX_RETRIES + 1):
+            r = await self.http.post(self._api_url(method), json=payload)
+            data = r.json()
+            if data.get("ok"):
+                return data["result"]
+            retry_after = (data.get("parameters") or {}).get("retry_after")
+            if data.get("error_code") == 429 and retry_after is not None and attempt < TG_MAX_RETRIES:
+                log.warning("telegram %s: 429, повтор через %s с", method, retry_after)
+                await self._sleep(min(float(retry_after), TG_MAX_RETRY_AFTER))
+                continue
             raise RuntimeError(f"telegram {method}: {data}")
-        return data["result"]
+        raise RuntimeError(f"telegram {method}: не удалось после {TG_MAX_RETRIES} повторов")
 
     async def send(self, chat_id: int, text: str, reply_markup: dict | None = None):
-        if len(text) <= 4096:
-            params: dict = {
-                "chat_id": chat_id,
-                "text": text,
-                "parse_mode": "HTML",
-                "disable_web_page_preview": True,
-            }
-            if reply_markup is not None:
-                params["reply_markup"] = reply_markup
-            return await self.call("sendMessage", **params)
-
-        chunks: list[str] = []
-        current: list[str] = []
-        current_len = 0
-        for line in text.splitlines(keepends=True):
-            if current_len + len(line) > 4096:
-                if current:
-                    chunks.append("".join(current))
-                    current = []
-                    current_len = 0
-                while len(line) > 4096:
-                    chunks.append(line[:4096])
-                    line = line[4096:]
-            current.append(line)
-            current_len += len(line)
-        if current:
-            chunks.append("".join(current))
-
+        chunks = split_html(text)
         last_res = None
         for i, chunk in enumerate(chunks):
-            params = {
+            params: dict = {
                 "chat_id": chat_id,
                 "text": chunk,
                 "parse_mode": "HTML",
@@ -107,7 +98,16 @@ class Bot:
             }
             if i == len(chunks) - 1 and reply_markup is not None:
                 params["reply_markup"] = reply_markup
-            last_res = await self.call("sendMessage", **params)
+            try:
+                last_res = await self.call("sendMessage", **params)
+            except RuntimeError as e:
+                if "can't parse entities" not in str(e):
+                    raise
+                # разметка сломана (например, неэкранированный текст сайта): лучше без форматирования, чем ничего
+                log.warning("telegram отверг HTML, отправляю текстом: %s", e)
+                params.pop("parse_mode")
+                params["text"] = html_to_plain(chunk)
+                last_res = await self.call("sendMessage", **params)
         return last_res
 
     async def _process_actions(
