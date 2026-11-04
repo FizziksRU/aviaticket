@@ -1,0 +1,4 @@
+B_u100_p2_v2stage10 {"virtual_seconds": 86488, "real_seconds": 2452.8, "outcomes": {"ok": 490}, "result_latency": {"p50": 96.5, "p95": 223.7, "max": 331.2, "n":
+B_u100_p2_v2parallel {"virtual_seconds": 86482, "real_seconds": 2545.9, "outcomes": {"ok": 490}, "result_latency": {"p50": 82.6, "p95": 196.1, "max": 254.8, "n"
+B_u100_p4_v2stage10 {"virtual_seconds": 86434, "real_seconds": 2645.0, "outcomes": {"ok": 490}, "result_latency": {"p50": 65.5, "p95": 167.5, "max": 297.7, "n":
+B_u100_p4_v2parallel {"virtual_seconds": 86443, "real_seconds": 2722.8, "outcomes": {"ok": 490}, "result_latency": {"p50": 33.6, "p95": 131.2, "max": 264.6, "n"

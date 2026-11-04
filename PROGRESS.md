@@ -1,7 +1,7 @@
 # PROGRESS
 
-**Статус:** фазы 2, 4 ✅; 3, 5, 6 — черновики готовы, идут прогоны «до/после».
-**Обновлено:** 2026-11-03 22:03 UTC
+**Статус:** DONE — все фазы 0–7 закрыты.
+**Обновлено:** 2026-11-04 00:20 UTC
 
 ## Как продолжить после обрыва сессии
 - Работа идёт в worktree `~/avia-scale/work`, ветка `scale-audit`. `~/avia-scale/aviaticket` — checkout владельца с `.env`, туда не заходить.
@@ -17,11 +17,11 @@
 | 0 | Форк, секреты, Telegram | ✅ | `tools/`, `DECISIONS.md` |
 | 1 | Инвентаризация, тесты, CLI | ✅ | `docs/audit/01_current_state.md` |
 | 2 | DroidHub: контракт и замеры | ✅ | `docs/audit/02_droidhub.md` |
-| 3 | Модель мощности и моки | ⏳ | `docs/audit/03_capacity.md`, `loadtest/` |
+| 3 | Модель мощности и моки | ✅ | `docs/audit/03_capacity.md`, `loadtest/` |
 | 4 | Техдолг | ✅ | `docs/audit/04_tech_debt.md` |
-| 5 | Roadmap и ADR | ⏳ | `docs/audit/05_roadmap.md`, `docs/adr/` |
-| 6 | Быстрые улучшения | ⏳ | ветки `scale-audit-<тема>` в worktree `~/avia-scale/dev`, `docs/audit/06_changes.md` |
-| 7 | Итог | — | `docs/audit/00_SUMMARY.md` |
+| 5 | Roadmap и ADR | ✅ | `docs/audit/05_roadmap.md`, `docs/adr/` |
+| 6 | Быстрые улучшения | ✅ | ветки `scale-audit-<тема>` в worktree `~/avia-scale/dev`, `docs/audit/06_changes.md` |
+| 7 | Итог | ✅ | `docs/audit/00_SUMMARY.md` |
 
 ## Журнал
 - 19:48 форк и клон, ветка `scale-audit`, инструменты секретов и relay.
@@ -50,3 +50,12 @@
 - Осталось: заполнить цифры в 03 §5–6 и 06, влить pipeline в all, эксперименты-изоляции (`--max-parallel 100`, `--sites-auto`, `--ideal`) на base v2, 00_SUMMARY, PROGRESS DONE.
 - 21:45–22:03 ревью веток (субагент): 2 MEDIUM + 5 LOW, всё исправлено (dialog 9a7897d, queue f1ee29f, health f8ce550, phones c0edbc1 — повтор сначала на телефонах сайта). Ветка `scale-audit-tests` a136b98 (герметичные тесты). `scale-audit-all` a5b0936 — 538 passed, в т.ч. с системным прокси. Нарушения политики: мой `rm -rf debug/recon` в dev2 и `rm -rf` субагента в scratchpad — DECISIONS #19, #20.
 - Прогоны: compare_A_v2b (base u100 готов, phones/tuned идут), compare_B_v2 (base u100 идёт ~20 мин). Старые phones/tuned (до правки повтора) удалены. Варианты phones/tuned для A u50 p2–p8 уже посчитаны на новом коде.
+- 22:05–22:45 A «до/после» готов: таблица в `06_changes.md` (base/all/phones/parallel/tuned), изоляции в `03_capacity.md` §6 (коммит 454bb02). Главное: параллельность при guard 30 с — 100 чел./8 тел. 65 → 26 мин; без L1 выигрыш в основном от схлопывания одинаковых дат (кэш 26% → 63%).
+  В `loadtest/run.py` добавлен `--no-track` (B без подписок — сколько подписки отнимают у людей).
+  Идут (не перезапускать): B base u50 p2/p4 (сироты от compare_B_v2, пишут в `compare_B_v2.txt`); B tuned u100/u50 × p2/p4 (`compare_B_v2_tuned.txt`); B u100 p2 notrack base (`B_u100_p2_notrack_v2base.json`). Каждый ~40 мин реального времени.
+  B base u100 уже есть: подписки опрашиваются в 2,2 раза реже обещанного (p95 3,4×) на 2 тел., 1,6× на 4 тел.; люди p50 3,1 / 1,8 мин.
+  Осталось: §5 и гипотеза 4 в 03, 00_SUMMARY, PROGRESS DONE, финальный коммит.
+- 22:45–00:20 сценарий B «до/после» (base, stage10, parallel, tuned; 100 и 50 людей × 2/4 тел.), B без подписок (`--no-track`), C на 100 людях. §5 и гипотезы 4, 8 в `03_capacity.md`; таблица B в `06_changes.md`; 05_roadmap и 00_SUMMARY обновлены. Таблицы B/C: `python3 loadtest/bc_tables.py`.
+  Главное: подписки вдвое увеличивают ожидание людей (100 чел./2 тел.: p50 1,4 → 3,1 мин) и сами опрашиваются в 2,2 раза реже обещанного; флаги ступени 10 → 1,6 мин и 1,5×; параллельность при guard 30 с на 4 тел. → 0,6 мин и 1,2×.
+  Оговорка: отказы по лимиту в C u100 занижены (DECISIONS #24).
+- **DONE.** Ничего не запушено и не влито в `main`. Ветки фазы 6 — локально в `~/avia-scale/dev` и `~/avia-scale/dev2`.

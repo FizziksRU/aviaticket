@@ -27,3 +27,5 @@ done
       $extra --tag "_v2$v" 2>/dev/null | grep -E "^[ABC]_u" | cut -c1-160'
 loadtest/compare.sh: line 23: syntax error near unexpected token `;;'
 loadtest/compare.sh: line 23: `       MAX_PARALLEL_SEARCHES=$p GUARD_SITE_CONCURRENCY=$(( p / 2 > 0 ? p / 2 : 1 )) SEARCH_PRIORITY=1 ;;'
+B_u50_p2_v2base {"virtual_seconds": 86400, "real_seconds": 1613.2, "outcomes": {"ok": 256}, "result_latency": {"p50": 107.0, "p95": 282.8, "max": 442.0, "n": 25
+B_u50_p4_v2base {"virtual_seconds": 86400, "real_seconds": 1740.9, "outcomes": {"ok": 256}, "result_latency": {"p50": 67.3, "p95": 219.4, "max": 380.5, "n": 256

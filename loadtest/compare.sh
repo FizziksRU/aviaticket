@@ -2,7 +2,7 @@
 # Сравнение «до/после» на одном профиле мока: loadtest/compare.sh "A" "50 100" "2 4 8"
 # Варианты: base (текущий код, ветка work), all (scale-audit-all без флагов),
 # phones (+PHONE_MAP по замерам, RETRY_OTHER_PHONE=1), tuned (+guard 10 с, параллельность по числу телефонов),
-# parallel (как tuned, но интервал guard прежний — 30 с).
+# parallel (как tuned, но интервал guard прежний — 30 с), stage10 (флаги ступени 10: карта, приоритет людей, позиция в очереди).
 set -uo pipefail
 cd "$(dirname "$0")/.."
 WORK="$PWD"; DEV="${DEV:-$HOME/avia-scale/dev}"
@@ -16,6 +16,7 @@ for v in $VARIANTS; do for s in $1; do for u in $2; do for p in $3; do echo "$v 
       base) src="'"$WORK"'/src" ;;
       all) ;;
       phones) extra="--phone-map optimal"; export RETRY_OTHER_PHONE=1 ;;
+      stage10) extra="--phone-map optimal"; export RETRY_OTHER_PHONE=1 SEARCH_PRIORITY=1 QUEUE_NOTICE=1 ;;
       tuned) extra="--phone-map optimal"; export RETRY_OTHER_PHONE=1 GUARD_MIN_INTERVAL=10 SITES_PER_SEARCH=6 \
                MAX_PARALLEL_SEARCHES=$p GUARD_SITE_CONCURRENCY=$(( p / 2 > 0 ? p / 2 : 1 )) SEARCH_PRIORITY=1 ;;
       parallel) extra="--phone-map optimal"; export RETRY_OTHER_PHONE=1 GUARD_MIN_INTERVAL=30 SITES_PER_SEARCH=6 \
